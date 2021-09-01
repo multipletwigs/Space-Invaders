@@ -10,9 +10,9 @@ function spaceinvaders() {
     CanvasSize: 600,
     ShipVelocity: 1,
     StartTime: 0,
-    BulletExpirationTime: 1000, 
+    BulletExpirationTime: 100, 
     BulletRadius: 3, 
-    BulletVelocity: 2
+    BulletVelocity: 4
   } as const 
 
   class Tick {constructor(public readonly elapsed: number) {}}
@@ -81,14 +81,39 @@ function spaceinvaders() {
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick) => 
+  const reduceState = (s: State, e: Motion|Tick|Shoot) => 
     e instanceof Motion ? {
       ...s, 
       ship: {...s.ship, direction: e.direction}
-    } : {
+    } : 
+    e instanceof Shoot? {
       ...s, 
-      ship: {...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.direction, 0)))}
+      bullets: s.bullets.concat([{id: String(s.objCount), createTime: s.time, pos: s.ship.pos, velocity: constants.BulletVelocity}]),
+      objCount: s.objCount + 1
+    } : tick(s, e.elapsed)
+    
+  
+  const tick = (s:State, elapsed: number) => {
+    const expired = (g: gameObjects) => (elapsed - g.createTime) > constants.BulletExpirationTime,
+    notExpired = (g: gameObjects) => (elapsed - g.createTime) <= constants.BulletExpirationTime,
+    expiredBullets:gameObjects[] = s.bullets.filter(expired),
+    activeBullets:gameObjects[] = s.bullets.filter(notExpired)
+
+    return {
+      ...s,
+      time: elapsed,
+      ship:{...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.direction, 0)))},
+      bullets: activeBullets.map(bulletMove), 
+      exit: expiredBullets
     }
+  }
+
+  function bulletMove(go: gameObjects): gameObjects{
+    return {
+      ...go, 
+      pos: new LinearMotion(go.pos.x, go.pos.y - go.velocity)
+    }
+  }
   
   const subscription = interval(10).pipe(
     map(elapsed => new Tick(elapsed)),
@@ -100,7 +125,28 @@ function spaceinvaders() {
 
   function updateView(s: State){
     const ship = document.getElementById("ship")!
+    const svg = document.getElementById("canvas")
     ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`)
+    
+    const updateBodyView = (b: gameObjects) => {
+       function createBodyView(){
+        const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
+        v.setAttribute("id", `${b.id}`)
+        v.setAttribute("rx", `${constants.BulletRadius}`)
+        v.setAttribute("ry", `${constants.BulletRadius}`)
+        v.setAttribute("fill", "white")
+        v.classList.add("Bullets")
+        svg.appendChild(v)
+        return v
+      }
+      const v = document.getElementById(b.id) || createBodyView();
+      v.setAttribute("cx", `${b.pos.x + 50}`) //50 to offset from ship position, do not want to ruin other places values
+      v.setAttribute("cy", `${b.pos.y}`)
+    };
+    s.bullets.forEach(updateBodyView)
+    s.exit.map(o=>document.getElementById(o.id))
+          .filter((item) => item !== null || undefined) //isNotNullorUndefined
+          .forEach(v => svg.removeChild(v))
   }
   
 
