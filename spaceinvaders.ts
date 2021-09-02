@@ -1,6 +1,14 @@
 import {fromEvent, interval} from 'rxjs';
 import {map, filter, scan, merge, reduce} from 'rxjs/operators'; 
 
+
+/* Things TO-DO 
+1. Find a better way to do array of monsters
+2. Add more constants to the constants list
+3. Find a better way to represent ID of a monster. So far bullets are 1 2 3 4  and aliens are hardcoded 
+4. Change array to array array
+*/
+
 function spaceinvaders() {
   type Event = "keydown" | "keyup"
   type Key = "a" | "d" | "w"
@@ -9,7 +17,9 @@ function spaceinvaders() {
     ShipStartPos: {x: 253, y:500},
     CanvasSize: 600,
     ShipVelocity: 1,
+    AlienVelocity: 0.25, 
     StartTime: 0,
+    StartAlienCount: 3,
     BulletExpirationTime: 100, 
     BulletRadius: 3, 
     BulletVelocity: 4
@@ -26,7 +36,7 @@ function spaceinvaders() {
   scale = (s: number) => new LinearMotion(this.x * s, this.y * s); 
 
   static Zero = new LinearMotion();
-}
+ }
 
   type ObjectID = Readonly<{
     id: string, 
@@ -48,17 +58,25 @@ function spaceinvaders() {
     ship: Ship
     bullets: ReadonlyArray<gameObjects>,
     exit: ReadonlyArray<gameObjects>, 
+    aliens: ReadonlyArray<gameObjects>,
     objCount: number, 
-    gameOver: boolean  
+    gameOver: boolean, 
+    level: number, //Later implementation for new levels
+    score: number
   }>
+
+  const createAliens = () => [1,2,3,4].map(i => <gameObjects>{id: "Alien" + String(i), pos: new LinearMotion(100 + i * 50, 100), velocity: constants.AlienVelocity, createTime: 0})
 
   const initialState: State = {
     time: 0,
     ship: {pos: new LinearMotion(constants.ShipStartPos.x, constants.ShipStartPos.y), direction: 0}, //Initial Position
     bullets: [],
     exit: [], 
+    aliens: createAliens(), 
     objCount: 0, 
-    gameOver: false
+    gameOver: false,
+    level: 1,
+    score: 0
   }
 
   const observeKey = <T>(e: Event, k: Key, result: () => T) => 
@@ -96,15 +114,21 @@ function spaceinvaders() {
   const tick = (s:State, elapsed: number) => {
     const expired = (g: gameObjects) => (elapsed - g.createTime) > constants.BulletExpirationTime,
     notExpired = (g: gameObjects) => (elapsed - g.createTime) <= constants.BulletExpirationTime,
+    moveAliens = (g: gameObjects) => (elapsed) > 300 ? {...g, pos: new LinearMotion(g.pos.x, g.pos.y + g.velocity)} :  {...g, pos: new LinearMotion(g.pos.x + g.velocity, g.pos.y)},
+    removeAlien = (g: gameObjects) => g.pos.y > 300, 
+
+    activeBullets:gameObjects[] = s.bullets.filter(notExpired),
+    activeAliens: gameObjects[] = s.aliens.map(moveAliens),
     expiredBullets:gameObjects[] = s.bullets.filter(expired),
-    activeBullets:gameObjects[] = s.bullets.filter(notExpired)
+    expiredAlien: gameObjects[] = s.aliens.filter(removeAlien)
 
     return {
       ...s,
       time: elapsed,
       ship:{...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.direction, 0)))},
       bullets: activeBullets.map(bulletMove), 
-      exit: expiredBullets
+      aliens: activeAliens,
+      exit: expiredBullets.concat(expiredAlien)
     }
   }
 
@@ -117,9 +141,7 @@ function spaceinvaders() {
   
   const subscription = interval(10).pipe(
     map(elapsed => new Tick(elapsed)),
-    merge(
-      startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot
-    ),
+    merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot),
     scan(reduceState, initialState))
     .subscribe(updateView)
 
@@ -128,8 +150,8 @@ function spaceinvaders() {
     const svg = document.getElementById("canvas")
     ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`)
     
-    const updateBodyView = (b: gameObjects) => {
-       function createBodyView(){
+    const updateBulletView = (b: gameObjects) => {
+       function createBulletView(){
         const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
         v.setAttribute("id", `${b.id}`)
         v.setAttribute("rx", `${constants.BulletRadius}`)
@@ -139,11 +161,30 @@ function spaceinvaders() {
         svg.appendChild(v)
         return v
       }
-      const v = document.getElementById(b.id) || createBodyView();
+      const v = document.getElementById(b.id) || createBulletView();
       v.setAttribute("cx", `${b.pos.x + 50}`) //50 to offset from ship position, do not want to ruin other places values
       v.setAttribute("cy", `${b.pos.y}`)
     };
-    s.bullets.forEach(updateBodyView)
+    s.bullets.forEach(updateBulletView)
+
+    const updateAlienView = (b: gameObjects) => {
+    function createAlienView(){
+      const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
+      v.setAttribute("id", `${b.id}`)
+      v.setAttribute("rx", `${constants.BulletRadius}`)
+      v.setAttribute("ry", `${constants.BulletRadius}`)
+      v.setAttribute("fill", "white")
+      v.classList.add("Bullets")
+      svg.appendChild(v)
+      return v
+    }
+    const v = document.getElementById(b.id) || createAlienView();
+    v.setAttribute("cx", `${b.pos.x}`) //50 to offset from ship position, do not want to ruin other places values
+    v.setAttribute("cy", `${b.pos.y}`)
+    };
+
+    s.aliens.forEach(updateAlienView)
+
     s.exit.map(o=>document.getElementById(o.id))
           .filter((item) => item !== null || undefined) //isNotNullorUndefined
           .forEach(v => svg.removeChild(v))
