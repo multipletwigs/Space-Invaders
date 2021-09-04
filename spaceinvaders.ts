@@ -15,13 +15,14 @@ function spaceinvaders() {
   type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship"
 
   const constants = {
-    AlienVelocity: 0.1, 
+    AlienVelocity: 0.5, 
     AlienWidth: 30,
     AlienHeight: 10,
     AlienColumns: 4, 
     AlienRows: 4,
     BulletExpirationTime: 100, 
-    BulletRadius: 3, 
+    BulletWidth: 3,
+    BulletLength: 12, 
     BulletVelocity: 4,
     CanvasSize: 600,
     StartTime: 0,
@@ -73,7 +74,7 @@ function spaceinvaders() {
     ({
       id: String(Math.floor(val/rows)) + String(index % columns) + vT,
       createTime: 0,
-      pos: new LinearMotion(100 + index % columns * 100, 100 + Math.floor(val/rows) * 50),
+      pos: new LinearMotion(100 + index % columns * 100, 50 + Math.floor(val/rows) * 50),
       velocity: velocity
     }))
 
@@ -122,14 +123,20 @@ function spaceinvaders() {
     } : tick(s, e.elapsed)
 
   function collisionCheck([a, b] : [gameObjects, gameObjects]): boolean{
-    return a.pos.x < b.pos.x + constants.AlienWidth && a.pos.y < b.pos.y + constants.AlienHeight && a.pos.x + constants.AlienWidth > b.pos.x && a.pos.y + constants.AlienHeight > b.pos.y
+    return a.pos.x < b.pos.x 
+    && a.pos.x + constants.AlienWidth > b.pos.x - constants.AlienWidth
+    && a.pos.y < b.pos.y + constants.AlienHeight
+    && a.pos.y + constants.BulletLength > b.pos.y
   }
     
   
   const tick = (s:State, elapsed: number) => {
     const expired = (g: gameObjects) => (elapsed - g.createTime) > constants.BulletExpirationTime,
     notExpired = (g: gameObjects) => (elapsed - g.createTime) <= constants.BulletExpirationTime,
-    moveAliens = (g: gameObjects) => (elapsed) > 300 ? {...g, pos: new LinearMotion(g.pos.x, g.pos.y + g.velocity)} :  {...g, pos: new LinearMotion(g.pos.x + g.velocity, g.pos.y)},
+    moveAliens = (g: gameObjects) => (elapsed) % 300 === 0 ? 
+    {...g, pos: new LinearMotion(g.pos.x, g.pos.y + 10)} : (elapsed % 300 <= 150) ? 
+                                                                   {...g, pos: new LinearMotion(g.pos.x + g.velocity, g.pos.y)} : 
+                                                                   {...g, pos: new LinearMotion(g.pos.x - g.velocity, g.pos.y)},
 
     activeBullets:gameObjects[] = s.shipBullets.filter(notExpired),
     expiredBullets:gameObjects[] = s.shipBullets.filter(expired),
@@ -169,18 +176,19 @@ function spaceinvaders() {
     
     const updateBulletView = (b: gameObjects) => {
        function createBulletView(){
-        const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
+        const v = document.createElementNS(svg.namespaceURI, "rect")!;
+        //Can use Objects.Entries
         v.setAttribute("id", `${b.id}`)
-        v.setAttribute("rx", `${constants.BulletRadius}`)
-        v.setAttribute("ry", `${constants.BulletRadius}`)
+        v.setAttribute("width", `${constants.BulletWidth}`)
+        v.setAttribute("height", `${constants.BulletLength}`)
         v.setAttribute("fill", "white")
         v.classList.add("Bullets")
         svg.appendChild(v)
         return v
       }
       const v = document.getElementById(b.id) || createBulletView();
-      v.setAttribute("cx", `${b.pos.x + 50}`) //50 to offset from ship position, do not want to ruin other places values
-      v.setAttribute("cy", `${b.pos.y}`)
+      v.setAttribute("x", `${b.pos.x + 50}`) //50 to offset from ship position, do not want to ruin other places values
+      v.setAttribute("y", `${b.pos.y}`)
     };
     s.shipBullets.forEach(updateBulletView)
 
@@ -216,7 +224,9 @@ function spaceinvaders() {
             }
           })
   }
-  
+
+
+  //Helper Functions
   function flatMap<T,U>(
     a:ReadonlyArray<T>,
     f:(a:T)=>ReadonlyArray<U>
