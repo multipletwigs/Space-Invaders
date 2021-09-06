@@ -31,8 +31,9 @@ function spaceinvaders() {
     StartTime: 0,
     ShipStartPos: {x: 253, y:500},
     ShipVelocity: 1,
-    ShieldNumber: 3,
-    ShieldHeight: 10, 
+    ShieldColumn: 3,
+    ShieldRow: 10, 
+    ShieldHeight: 5, 
     ShieldWidth: 150
   } as const 
 
@@ -92,12 +93,12 @@ function spaceinvaders() {
       objWidth: constants.AlienWidth
     }))
 
-    const createShields = (vT: ViewType) => (columns: number) => 
-    [...Array(columns).keys()].map(
+    const createShields = (vT: ViewType) => (columns: number) => (rows: number) =>
+    [...Array(columns * rows).keys()].map(
       (val, index) => ({
-        id: String(val) + vT,
+        id: String(Math.floor(val/rows)) + String(index % columns) + vT,
         createTime: 0,
-        pos: new LinearMotion(25 + 200 * val, 450),
+        pos: new LinearMotion(25 + index % columns * 200, 450 + Math.floor(val/rows) * 10),
         velocity: 0, 
         objHeight: constants.ShieldHeight, 
         objWidth: constants.ShieldWidth
@@ -114,7 +115,7 @@ function spaceinvaders() {
             objHeight: constants.ShipHeight, 
             objWidth: constants.ShipWidth
           }, 
-    shields: createShields("shields")(constants.ShieldNumber),
+    shields: createShields("shields")(constants.ShieldColumn)(constants.ShieldRow),
     shieldPores: [],
     shipBullets: [],
     alienBullets: [], 
@@ -206,7 +207,8 @@ function spaceinvaders() {
 
     //Can be generalized
     collidedBullets = collidedBulletsAndAliens.map(([bullet,_])=>bullet),
-    collidedAlienBulletsShield = collidedAlienBulletsAndShield.map(([_, b]) => b),
+    collidedAlienBullets = collidedAlienBulletsAndShield.map(([_, b]) => b),
+    collidedAlienShield = collidedAlienBulletsAndShield.map(([s, _]) => s),
     collidedAliens = collidedBulletsAndAliens.map(([_,aliens])=>aliens),
     //Can be generalized
     activeAliens = s.aliens.filter(n => !collidedAliens.includes(n))
@@ -214,10 +216,10 @@ function spaceinvaders() {
     return <State>{
       ...s, 
       shipBullets: s.shipBullets.filter(n => !collidedBullets.includes(n)).map(b => bulletMove(b)(-1)), 
-      alienBullets: s.alienBullets.filter(n => !collidedAlienBulletsShield.includes(n)).map(b => bulletMove(b)(1)),
+      alienBullets: s.alienBullets.filter(n => !collidedAlienBullets.includes(n)).map(b => bulletMove(b)(1)),
+      shields: s.shields.filter(n => !collidedAlienShield.includes(n)),
       aliens: activeAliens,
-      shieldPores: s.shieldPores.concat(collidedAlienBulletsShield),
-      exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBulletsShield),
+      exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
       score: s.score + collidedAliens.length,
       gameOver: collidedBulletsAndShip.length > 0 ? true: activeAliens.length === 0 ? true: false  //Probably a better implementation
     }
@@ -286,22 +288,6 @@ function spaceinvaders() {
       v.setAttribute("y", `${b.pos.y}`)
     };
 
-    const updateCircleView = (b: gameObjects) => {
-      function createCircleView(){
-       const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
-       //Can use Objects.Entries
-       v.setAttribute("id", "pores")
-       v.setAttribute("rx", `10`)
-       v.setAttribute("ry", `10`)
-       v.setAttribute("fill", "grey")
-       v.classList.add("Pores")
-       svg.appendChild(v)
-       return v
-     }
-     const v = document.getElementById(b.id) || createCircleView();
-     v.setAttribute("cx", `${b.pos.x}`) 
-     v.setAttribute("cy", `${b.pos.y}`)
-   };
     s.shipBullets.forEach(updateBulletView)
 
     const updateAlienView = (b: gameObjects) => {
@@ -323,7 +309,6 @@ function spaceinvaders() {
 
     s.aliens.forEach(updateAlienView)
     s.shields.forEach(updateAlienView)
-    s.shieldPores.forEach(updateCircleView)
     s.alienBullets.forEach(updateBulletView)
 
     s.exit.map(o=>document.getElementById(o.id))
