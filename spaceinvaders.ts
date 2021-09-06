@@ -3,18 +3,17 @@ import {map, filter, scan, merge, reduce, mergeMap, concatMap} from 'rxjs/operat
 
 
 /* Things TO-DO 
-1. Find a better way to do ship because ship collision is cringe
-2. Fix Alien Randomizer
-3. Find better way to query g tag boundaries
-4. Fix hitbox 
-5. Add in Restart Button
-6. wrap function offset
+1. Alien Randomizer needs fixing
+2. Question on drawing ontop while ignoring the rectangle 
+
+Optimization: 
+1. Generalize flatMapped function 
 */
 
 function spaceinvaders() {
   type Event = "keydown" | "keyup"
   type Key = "a" | "d" | "w" | "r"
-  type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship"
+  type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship" | "shields"
 
   const constants = {
     AlienVelocity: 0.5, 
@@ -30,9 +29,11 @@ function spaceinvaders() {
     ShipHeight: 70.15,
     CanvasSize: 600,
     StartTime: 0,
-    StartAlienCount: 16,
     ShipStartPos: {x: 253, y:500},
-    ShipVelocity: 1
+    ShipVelocity: 1,
+    ShieldNumber: 3,
+    ShieldHeight: 10, 
+    ShieldWidth: 150
   } as const 
 
   class Tick {constructor(public readonly elapsed: number) {}}
@@ -42,12 +43,12 @@ function spaceinvaders() {
   class Restart{constructor(){}}
 
   class LinearMotion{
-  constructor(public readonly x: number = 0, public readonly y: number = 0){}
-  add = (b: LinearMotion) => new LinearMotion(this.x + b.x, this.y + b.y);
-  sub = (b: LinearMotion) => this.add(b.scale(-1));
-  scale = (s: number) => new LinearMotion(this.x * s, this.y * s);
+    constructor(public readonly x: number = 0, public readonly y: number = 0){}
+    add = (b: LinearMotion) => new LinearMotion(this.x + b.x, this.y + b.y);
+    sub = (b: LinearMotion) => this.add(b.scale(-1));
+    scale = (s: number) => new LinearMotion(this.x * s, this.y * s);
 
-  static Zero = new LinearMotion();
+    static Zero = new LinearMotion();
  }
 
   type ObjectID = Readonly<{
@@ -67,6 +68,8 @@ function spaceinvaders() {
   type State = Readonly<{
     time: number,
     ship: gameObjects,
+    shields: ReadonlyArray<gameObjects>,
+    shieldPores: ReadonlyArray<gameObjects>,
     shipBullets: ReadonlyArray<gameObjects>,
     alienBullets: ReadonlyArray<gameObjects>,
     exit: ReadonlyArray<gameObjects>, 
@@ -78,7 +81,7 @@ function spaceinvaders() {
     score: number
   }>
 
-  const createAliens = (vT: ViewType) => (rows: number) => (columns: number) => (velocity: number) => [...Array(constants.StartAlienCount).keys()].map(
+  const createAliens = (vT: ViewType) => (rows: number) => (columns: number) => (velocity: number) => [...Array(rows * columns).keys()].map(
     (val, index) => 
     ({
       id: String(Math.floor(val/rows)) + String(index % columns) + vT,
@@ -88,6 +91,18 @@ function spaceinvaders() {
       objHeight: constants.AlienHeight,
       objWidth: constants.AlienWidth
     }))
+
+    const createShields = (vT: ViewType) => (columns: number) => 
+    [...Array(columns).keys()].map(
+      (val, index) => ({
+        id: String(val) + vT,
+        createTime: 0,
+        pos: new LinearMotion(25 + 200 * val, 450),
+        velocity: 0, 
+        objHeight: constants.ShieldHeight, 
+        objWidth: constants.ShieldWidth
+      })
+    )
 
   const initialState: State = {
     time: 0,
@@ -99,6 +114,8 @@ function spaceinvaders() {
             objHeight: constants.ShipHeight, 
             objWidth: constants.ShipWidth
           }, 
+    shields: createShields("shields")(constants.ShieldNumber),
+    shieldPores: [],
     shipBullets: [],
     alienBullets: [], 
     exit: [], 
@@ -176,21 +193,33 @@ function spaceinvaders() {
   }
   
   const handleCollisions = (s: State): State => {
-    const allBulletsAndAliens = flatMap(s.shipBullets, b=> s.aliens.map<[gameObjects, gameObjects]>(r=>([b,r]))),
+    const 
+    allBulletsAndAliens = flatMap(s.shipBullets, b=> s.aliens.map<[gameObjects, gameObjects]>(r=>([b,r]))),
     allBulletsAndShip = s.alienBullets.map(x => [x, s.ship]),
+    allAlienBulletsAndShield = flatMap(s.alienBullets, shield => s.shields.map<[gameObjects, gameObjects]>(r => ([r, shield]))), 
+
+    //Can be generalized
     collidedBulletsAndShip = allBulletsAndShip.filter(collisionCheck),
     collidedBulletsAndAliens = allBulletsAndAliens.filter(collisionCheck),
+    collidedAlienBulletsAndShield = allAlienBulletsAndShield.filter(collisionCheck),
+    //Can be generalized
+
+    //Can be generalized
     collidedBullets = collidedBulletsAndAliens.map(([bullet,_])=>bullet),
-    collidedAliens = collidedBulletsAndAliens.map(([_,aliens])=>aliens)
+    collidedAlienBulletsShield = collidedAlienBulletsAndShield.map(([_, b]) => b),
+    collidedAliens = collidedBulletsAndAliens.map(([_,aliens])=>aliens),
+    //Can be generalized
+    activeAliens = s.aliens.filter(n => !collidedAliens.includes(n))
 
     return <State>{
       ...s, 
       shipBullets: s.shipBullets.filter(n => !collidedBullets.includes(n)).map(b => bulletMove(b)(-1)), 
-      alienBullets: s.alienBullets.map(b => bulletMove(b)(1)),
-      aliens: s.aliens.filter(n => !collidedAliens.includes(n)),
-      exit: s.exit.concat(collidedBullets, collidedAliens),
+      alienBullets: s.alienBullets.filter(n => !collidedAlienBulletsShield.includes(n)).map(b => bulletMove(b)(1)),
+      aliens: activeAliens,
+      shieldPores: s.shieldPores.concat(collidedAlienBulletsShield),
+      exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBulletsShield),
       score: s.score + collidedAliens.length,
-      gameOver: collidedBulletsAndShip.length > 0 ? true: false
+      gameOver: collidedBulletsAndShip.length > 0 ? true: activeAliens.length === 0 ? true: false  //Probably a better implementation
     }
   }
   
@@ -256,8 +285,24 @@ function spaceinvaders() {
       v.setAttribute("x", `${b.pos.x}`) //50 to offset from ship position, do not want to ruin other places values
       v.setAttribute("y", `${b.pos.y}`)
     };
+
+    const updateCircleView = (b: gameObjects) => {
+      function createCircleView(){
+       const v = document.createElementNS(svg.namespaceURI, "ellipse")!;
+       //Can use Objects.Entries
+       v.setAttribute("id", "pores")
+       v.setAttribute("rx", `10`)
+       v.setAttribute("ry", `10`)
+       v.setAttribute("fill", "grey")
+       v.classList.add("Pores")
+       svg.appendChild(v)
+       return v
+     }
+     const v = document.getElementById(b.id) || createCircleView();
+     v.setAttribute("cx", `${b.pos.x}`) 
+     v.setAttribute("cy", `${b.pos.y}`)
+   };
     s.shipBullets.forEach(updateBulletView)
-    s.alienBullets.forEach(updateBulletView)
 
     const updateAlienView = (b: gameObjects) => {
     function createAlienView(){
@@ -277,6 +322,9 @@ function spaceinvaders() {
     };
 
     s.aliens.forEach(updateAlienView)
+    s.shields.forEach(updateAlienView)
+    s.shieldPores.forEach(updateCircleView)
+    s.alienBullets.forEach(updateBulletView)
 
     s.exit.map(o=>document.getElementById(o.id))
           .filter((item) => item !== null || undefined) //isNotNullorUndefined
@@ -313,11 +361,14 @@ function spaceinvaders() {
     float(){
       return this.int() / (this.m - 1); 
     }
+    next(){
+      return new RAS(this.int())
+    }
   } 
 
   //Lazy Sequence Number generator
   function randomAlienSelector(arr: Readonly<gameObjects[]>, seed: number): gameObjects{
-    const rasObj = new RAS(arr.length + seed)
+    const rasObj = new RAS(arr.length)
     const selector = arr[Math.floor(Math.random() * arr.length)] //Math.random() implementation is cringe
     return selector
   }
