@@ -3,17 +3,17 @@ import {map, filter, scan, merge, reduce, mergeMap, concatMap} from 'rxjs/operat
 
 
 /* Things TO-DO 
-1. Find a better way to represent ID of a monster. So far bullets are 1 2 3 4  and aliens are hardcoded 
-2. Try and fix collision problem with rectangle and bullet
-3. Generalize the collision handler
-4. Adding Score 
-5. Making aliens shoot at random by using the RNG class
-6. Minimum requirements should be done
+1. Find a better way to do ship because ship collision is cringe
+2. Fix Alien Randomizer
+3. Find better way to query g tag boundaries
+4. Fix hitbox 
+5. Add in Restart Button
+6. wrap function offset
 */
 
 function spaceinvaders() {
   type Event = "keydown" | "keyup"
-  type Key = "a" | "d" | "w"
+  type Key = "a" | "d" | "w" | "r"
   type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship"
 
   const constants = {
@@ -35,12 +35,11 @@ function spaceinvaders() {
     ShipVelocity: 1
   } as const 
 
-  console.log(constants)
-
   class Tick {constructor(public readonly elapsed: number) {}}
   class Motion {constructor(public readonly direction: number) {}}
   class Shoot{constructor(){}}
   class alienShooter{constructor(){}}
+  class Restart{constructor(){}}
 
   class LinearMotion{
   constructor(public readonly x: number = 0, public readonly y: number = 0){}
@@ -124,15 +123,16 @@ function spaceinvaders() {
   const stopRightMove = observeKey('keyup', 'd', () => new Motion(0))
   const shoot = observeKey('keydown', 'w', ()=>new Shoot())
   const alienShoot = interval(1000).pipe(map(_ => new alienShooter()))
+  const restartGame = observeKey('keydown', 'r', () => new Restart)
 
   function wrapAround({x, y}: LinearMotion): LinearMotion{
     const size = constants.CanvasSize 
-    const wrapped = (position_x: number) => position_x > size ? position_x - size : position_x < 0 ? position_x + size : position_x 
+    const wrapped = (position_x: number) => position_x + constants.ShipWidth > size ? position_x - size : position_x < 0 ? position_x + size : position_x 
 
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick|Shoot|alienShooter) => 
+  const reduceState = (s: State, e: Motion|Tick|Shoot|alienShooter|Restart) => 
     e instanceof Motion ? {
       ...s, 
       ship: {...s.ship, velocity: e.direction}
@@ -162,7 +162,11 @@ function spaceinvaders() {
           objWidth: constants.BulletWidth
         })
       )
-    } : tick(s, e.elapsed)
+    } : 
+    e instanceof Restart ?{
+      ...initialState
+    } :
+    tick(s, e.elapsed)
 
   function collisionCheck([a, b] : [gameObjects, gameObjects]): boolean{
     return a.pos.x < b.pos.x + b.objWidth
@@ -178,7 +182,6 @@ function spaceinvaders() {
     collidedBulletsAndAliens = allBulletsAndAliens.filter(collisionCheck),
     collidedBullets = collidedBulletsAndAliens.map(([bullet,_])=>bullet),
     collidedAliens = collidedBulletsAndAliens.map(([_,aliens])=>aliens)
-    console.log(allBulletsAndShip)
 
     return <State>{
       ...s, 
@@ -229,10 +232,11 @@ function spaceinvaders() {
     .subscribe(updateView)
 
   function updateView(s: State){
-    console.log(s.alienBullets)
     const ship = document.getElementById("ship")!
     const svg = document.getElementById("canvas")
     ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`)
+    const scores = document.getElementById("Scores")!; 
+    scores.textContent = `Score: ${s.score}`
 
     if(s.gameOver){subscription.unsubscribe()}
     
@@ -311,6 +315,7 @@ function spaceinvaders() {
     }
   } 
 
+  //Lazy Sequence Number generator
   function randomAlienSelector(arr: Readonly<gameObjects[]>, seed: number): gameObjects{
     const rasObj = new RAS(arr.length + seed)
     const selector = arr[Math.floor(Math.random() * arr.length)] //Math.random() implementation is cringe
