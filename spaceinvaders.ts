@@ -91,6 +91,7 @@ function spaceinvaders() {
     level: number, //Later implementation for new levels
     alienMultiplier: number,
     score: number,
+    restarted: false,
   }>
 
   const createStatic = (sP: staticGroup) =>
@@ -150,21 +151,17 @@ function spaceinvaders() {
     level: 0,
     alienMultiplier: 3,
     score: 0,
+    restarted: false
   }
 
-  const observeKey = <T>(e: Event, k: Key, result: () => T) => 
-                     fromEvent<KeyboardEvent>(document, e).pipe(
-                       filter(({key}) => key === k),
-                       filter(({repeat}) => !repeat), 
-                       map(result)
-                     )
+  const observeKey = <T>(e: Event, k: Key, result: () => T) => fromEvent<KeyboardEvent>(document, e).pipe(filter(({key}) => key === k),filter(({repeat}) => !repeat), map(result))
                      
   const startLeftMove = observeKey('keydown', 'a', () => new Motion(-constants.ShipVelocity))
   const startRightMove = observeKey('keydown', 'd', () => new Motion(constants.ShipVelocity))
   const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0))
   const stopRightMove = observeKey('keyup', 'd', () => new Motion(0))
   const shoot = observeKey('keydown', 'w', ()=>new Shoot())
-  const restartGame = observeKey('keydown', 'r', () => new Restart)
+  const restartGame = observeKey('keydown', 'r', () => new Restart())
 
   function wrapAround({x, y}: LinearMotion): LinearMotion{
     const size = constants.CanvasSize 
@@ -194,7 +191,8 @@ function spaceinvaders() {
     e instanceof Restart ?{
       ...initialState,
       time: 0,
-      exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens)
+      exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens),
+      restarted: true
     } :
     tick(s)
 
@@ -234,7 +232,7 @@ function spaceinvaders() {
       aliens: activeAliens,
       exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
       score: s.score + collidedAliens.length,
-      gameOver: collidedBulletsAndShip.length > 0 ? true: false 
+      gameOver: collidedBulletsAndShip.length > 0 ? true: false
     }
   }
   
@@ -263,16 +261,40 @@ function spaceinvaders() {
       }) 
     ): [] : []
 
-    
-    return handleCollisions({
+    const stateToReturn = s.aliens.length === 0 ? <State>{
+      time: 0,
+      ship: {
+              id: "playerShip", 
+              pos: new LinearMotion(constants.ShipStartPos.x, constants.ShipStartPos.y), 
+              velocity: 0, 
+              createTime: 0,
+              objHeight: constants.ShipHeight, 
+              objWidth: constants.ShipWidth
+            }, 
+      shields: createStatic(staticShield),
+      shipBullets: [],
+      alienBullets: [], 
+      exit: [], 
+      aliens: createStatic(staticAlien), 
+      objCount: 0, 
+      gameOver: false,
+      level: s.level + 1,
+      alienMultiplier: 3,
+      score: 0,
+      restarted: false
+    } : s.gameOver ? <State>{...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets)} :
+     handleCollisions(<State>{
       ...s,
       time: s.time + 1,
       ship:{...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0)))},
       shipBullets: activeShipBullets, 
       alienBullets: activeAlienBullets.concat(alienBullets),
       exit: expiredShipBullets.concat(expiredAlienBullets),
-      aliens: s.aliens.map(moveAliens)
+      aliens: s.aliens.map(moveAliens),
+      restarted: false
     })
+
+    return stateToReturn
   }
 
   const bulletMove = (go: gameObjects) => (direction: number) => {
@@ -297,7 +319,26 @@ function spaceinvaders() {
     const levels = document.getElementById("Level")!; 
     levels.textContent = `Level: ${s.level + 1}`
 
-    if(s.gameOver){subscription.unsubscribe()}
+    if(s.gameOver){
+      const v = document.getElementById("gameover")
+      if (v === null){
+        const v = document.createElementNS(svg.namespaceURI, "text")!;
+        v.setAttribute('x', '75'),
+        v.setAttribute('y', '300'),
+        v.setAttribute('fill', 'white')
+        v.setAttribute('font-size', '25')
+        v.setAttribute('id', "gameover")
+        v.textContent = "Game Over: Press R to restart the game :)";
+        svg.appendChild(v);
+      }
+    }
+    else{
+      try {
+        const v = document.getElementById("gameover")
+        svg.removeChild(v)
+      } catch (error) {
+      }
+    }
     
 
     const updateRectView = (b: gameObjects, classType: string) => {
