@@ -1,5 +1,5 @@
 import {fromEvent, interval} from 'rxjs';
-import {map, filter, scan, merge, reduce, mergeMap, concatMap} from 'rxjs/operators'; 
+import {map, filter, scan, merge, repeatWhen} from 'rxjs/operators'; 
 
 
 /* Things TO-DO 
@@ -30,9 +30,9 @@ function spaceinvaders() {
     CanvasSize: 600,
     StartTime: 0,
     ShipStartPos: {x: 253, y:500},
-    ShipVelocity: 1,
+    ShipVelocity: 2,
     ShieldColumn: 3,
-    ShieldRow: 10, 
+    ShieldRow: 3, 
     ShieldHeight: 5, 
     ShieldWidth: 150
   } as const 
@@ -40,7 +40,6 @@ function spaceinvaders() {
   class Tick {constructor(public readonly elapsed: number) {}}
   class Motion {constructor(public readonly direction: number) {}}
   class Shoot{constructor(){}}
-  class alienShooter{constructor(){}}
   class Restart{constructor(){}}
 
   class LinearMotion{
@@ -57,6 +56,19 @@ function spaceinvaders() {
     createTime: number 
   }>
 
+  type staticGroup =Readonly<{
+    vT: ViewType,
+    rows: number,
+    columns: number,  
+    velocity: number,  
+    x_start: number,  
+    y_start: number, 
+    x_offset: number,  
+    y_offset:number,
+    staticHeight: number, 
+    staticWidth: number
+  }>
+
   interface gameObjectsI extends ObjectID {
     pos: LinearMotion,
     velocity: number,
@@ -70,7 +82,6 @@ function spaceinvaders() {
     time: number,
     ship: gameObjects,
     shields: ReadonlyArray<gameObjects>,
-    shieldPores: ReadonlyArray<gameObjects>,
     shipBullets: ReadonlyArray<gameObjects>,
     alienBullets: ReadonlyArray<gameObjects>,
     exit: ReadonlyArray<gameObjects>, 
@@ -79,32 +90,46 @@ function spaceinvaders() {
     gameOver: boolean, 
     level: number, //Later implementation for new levels
     alienMultiplier: number,
-    score: number
+    score: number,
   }>
 
-  const createAliens = (vT: ViewType) => (rows: number) => (columns: number) => (velocity: number) => [...Array(rows * columns).keys()].map(
+  const createStatic = (sP: staticGroup) =>
+  [...Array(sP.rows * sP.columns).keys()].map(
     (val, index) => 
     ({
-      id: String(Math.floor(val/rows)) + String(index % columns) + vT,
+      id: String(Math.floor(val/sP.rows)) + String(index % sP.columns) + sP.vT,
       createTime: 0,
-      pos: new LinearMotion(100 + index % columns * 100, 50 + Math.floor(val/rows) * 50),
-      velocity: velocity,
-      objHeight: constants.AlienHeight,
-      objWidth: constants.AlienWidth
+      pos: new LinearMotion(sP.x_start + index % sP.columns * sP.x_offset, sP.y_start + Math.floor(val/sP.rows) * sP.y_offset),
+      velocity: sP.velocity,
+      objHeight: sP.staticHeight,
+      objWidth: sP.staticWidth
     }))
 
-    const createShields = (vT: ViewType) => (columns: number) => (rows: number) =>
-    [...Array(columns * rows).keys()].map(
-      (val, index) => ({
-        id: String(Math.floor(val/rows)) + String(index % columns) + vT,
-        createTime: 0,
-        pos: new LinearMotion(25 + index % columns * 200, 450 + Math.floor(val/rows) * 10),
-        velocity: 0, 
-        objHeight: constants.ShieldHeight, 
-        objWidth: constants.ShieldWidth
-      })
-    )
+  const staticShield: staticGroup = {
+    vT: "shields",
+    rows: constants.ShieldRow,
+    columns: constants.ShieldColumn,  
+    velocity: 0,  
+    x_start: 25,  
+    y_start: 450, 
+    x_offset: 200,  
+    y_offset:10, 
+    staticHeight: constants.ShieldHeight,
+    staticWidth: constants.ShieldWidth
+  }
 
+  const staticAlien: staticGroup = {
+    vT: "alien",
+    rows: constants.AlienRows,
+    columns: constants.AlienColumns,  
+    velocity: constants.AlienVelocity,  
+    x_start: 100,  
+    y_start: 50, 
+    x_offset: 100,  
+    y_offset: 50, 
+    staticHeight: constants.AlienHeight,
+    staticWidth: constants.AlienWidth
+  }
   const initialState: State = {
     time: 0,
     ship: {
@@ -115,17 +140,16 @@ function spaceinvaders() {
             objHeight: constants.ShipHeight, 
             objWidth: constants.ShipWidth
           }, 
-    shields: createShields("shields")(constants.ShieldColumn)(constants.ShieldRow),
-    shieldPores: [],
+    shields: createStatic(staticShield),
     shipBullets: [],
     alienBullets: [], 
     exit: [], 
-    aliens: createAliens("alien")(constants.AlienColumns)(constants.AlienRows)(constants.AlienVelocity), 
+    aliens: createStatic(staticAlien), 
     objCount: 0, 
     gameOver: false,
     level: 0,
     alienMultiplier: 3,
-    score: 0
+    score: 0,
   }
 
   const observeKey = <T>(e: Event, k: Key, result: () => T) => 
@@ -140,7 +164,6 @@ function spaceinvaders() {
   const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0))
   const stopRightMove = observeKey('keyup', 'd', () => new Motion(0))
   const shoot = observeKey('keydown', 'w', ()=>new Shoot())
-  const alienShoot = interval(1000).pipe(map(_ => new alienShooter()))
   const restartGame = observeKey('keydown', 'r', () => new Restart)
 
   function wrapAround({x, y}: LinearMotion): LinearMotion{
@@ -150,7 +173,7 @@ function spaceinvaders() {
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick|Shoot|alienShooter|Restart) => 
+  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart) => 
     e instanceof Motion ? {
       ...s, 
       ship: {...s.ship, velocity: e.direction}
@@ -168,23 +191,12 @@ function spaceinvaders() {
         }]),
       objCount: s.objCount + 1
     } : 
-    e instanceof alienShooter?{
-      ...s,
-      alienBullets: [...Array(s.level + s.alienMultiplier)].map(
-        (x, i) => ({
-          id: i + "alienBullets",
-          createTime: s.time,
-          pos: randomAlienSelector(s.aliens, i * i).pos.add(new LinearMotion(constants.AlienWidth/2, constants.AlienHeight)), //offset for alien bullet
-          velocity: constants.BulletVelocity, 
-          objHeight: constants.BulletLength,
-          objWidth: constants.BulletWidth
-        })
-      )
-    } : 
     e instanceof Restart ?{
-      ...initialState
+      ...initialState,
+      time: 0,
+      exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens)
     } :
-    tick(s, e.elapsed)
+    tick(s)
 
   function collisionCheck([a, b] : [gameObjects, gameObjects]): boolean{
     return a.pos.x < b.pos.x + b.objWidth
@@ -197,20 +209,21 @@ function spaceinvaders() {
     const 
     allBulletsAndAliens = flatMap(s.shipBullets, b=> s.aliens.map<[gameObjects, gameObjects]>(r=>([b,r]))),
     allBulletsAndShip = s.alienBullets.map(x => [x, s.ship]),
-    allAlienBulletsAndShield = flatMap(s.alienBullets, shield => s.shields.map<[gameObjects, gameObjects]>(r => ([r, shield]))), 
+    allAlienBulletsAndShield = flatMap(s.alienBullets, shield => s.shields.map<[gameObjects, gameObjects]>(r => ([r, shield]))) 
 
-    //Can be generalized
-    collidedBulletsAndShip = allBulletsAndShip.filter(collisionCheck),
-    collidedBulletsAndAliens = allBulletsAndAliens.filter(collisionCheck),
-    collidedAlienBulletsAndShield = allAlienBulletsAndShield.filter(collisionCheck),
-    //Can be generalized
+    const colliderFilter = (arr: ReadonlyArray<gameObjects[]>, colliderLogic: (entry: [gameObjects,gameObjects]) => boolean) => {
+      return <ReadonlyArray<gameObjects[]>>arr.filter(colliderLogic)
+    },
 
-    //Can be generalized
+    collidedBulletsAndShip = colliderFilter(allBulletsAndShip, collisionCheck),
+    collidedBulletsAndAliens = colliderFilter(allBulletsAndAliens, collisionCheck),
+    collidedAlienBulletsAndShield = colliderFilter(allAlienBulletsAndShield, collisionCheck),
+
     collidedBullets = collidedBulletsAndAliens.map(([bullet,_])=>bullet),
-    collidedAlienBullets = collidedAlienBulletsAndShield.map(([_, b]) => b),
-    collidedAlienShield = collidedAlienBulletsAndShield.map(([s, _]) => s),
+    collidedAlienBullets = collidedAlienBulletsAndShield.map(([_, bullet]) => bullet),
+    collidedAlienShield = collidedAlienBulletsAndShield.map(([shield, _]) => shield),
     collidedAliens = collidedBulletsAndAliens.map(([_,aliens])=>aliens),
-    //Can be generalized
+
     activeAliens = s.aliens.filter(n => !collidedAliens.includes(n))
 
     return <State>{
@@ -221,29 +234,42 @@ function spaceinvaders() {
       aliens: activeAliens,
       exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
       score: s.score + collidedAliens.length,
-      gameOver: collidedBulletsAndShip.length > 0 ? true: activeAliens.length === 0 ? true: false  //Probably a better implementation
+      gameOver: collidedBulletsAndShip.length > 0 ? true: false 
     }
   }
   
-  const tick = (s:State, elapsed: number) => {
-    const expired = (g: gameObjects) => (elapsed - g.createTime) > constants.BulletExpirationTime,
-    notExpired = (g: gameObjects) => (elapsed - g.createTime) <= constants.BulletExpirationTime,
-    moveAliens = (g: gameObjects) => (elapsed) % 300 === 0 ? 
-    {...g, pos: new LinearMotion(g.pos.x, g.pos.y + 10)} : (elapsed % 300 <= 150) ? 
-                                                           {...g, pos: new LinearMotion(g.pos.x + g.velocity, g.pos.y)} : 
-                                                           {...g, pos: new LinearMotion(g.pos.x - g.velocity, g.pos.y)},
+  const tick = (s:State) => {
+    const 
+    expired = (g: gameObjects) => (s.time - g.createTime) > constants.BulletExpirationTime,
+    notExpired = (g: gameObjects) => (s.time - g.createTime) <= constants.BulletExpirationTime,
+    moveAliens = (g: gameObjects) => (s.time) % 300 === 0 ? 
+                                     {...g, pos: new LinearMotion(g.pos.x, g.pos.y + 10)} : ((s.time) % 300 <= 150) ? 
+                                     {...g, pos: new LinearMotion(g.pos.x + g.velocity, g.pos.y)} : 
+                                     {...g, pos: new LinearMotion(g.pos.x - g.velocity, g.pos.y)},                                 
+
     activeShipBullets:gameObjects[] = s.shipBullets.filter(notExpired),
     activeAlienBullets:gameObjects[] = s.alienBullets.filter(notExpired),
     expiredAlienBullets:gameObjects[] = s.alienBullets.filter(expired),
-    expiredShipBullets:gameObjects[] = s.shipBullets.filter(expired)
+    expiredShipBullets:gameObjects[] = s.shipBullets.filter(expired),
+
+    alienBullets: gameObjects[] = s.aliens.length > 0 ? s.time % 100 === 0 ? [...Array(s.level + s.alienMultiplier)].map(
+      (_, i) => ({
+        id: i + "alienBullets",
+        createTime: s.time,
+        pos: randomAlienSelector(s.aliens, i).pos.add(new LinearMotion(constants.AlienWidth/2, constants.AlienHeight)), //offset for alien bullet
+        velocity: constants.BulletVelocity, 
+        objHeight: constants.BulletLength,
+        objWidth: constants.BulletWidth
+      }) 
+    ): [] : []
 
     
     return handleCollisions({
       ...s,
-      time: elapsed,
+      time: s.time + 1,
       ship:{...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0)))},
       shipBullets: activeShipBullets, 
-      alienBullets: activeAlienBullets,
+      alienBullets: activeAlienBullets.concat(alienBullets),
       exit: expiredShipBullets.concat(expiredAlienBullets),
       aliens: s.aliens.map(moveAliens)
     })
@@ -258,7 +284,7 @@ function spaceinvaders() {
   
   const subscription = interval(10).pipe(
     map(elapsed => new Tick(elapsed)),
-    merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot, alienShoot),
+    merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot, restartGame),
     scan(reduceState, initialState))
     .subscribe(updateView)
 
@@ -268,61 +294,37 @@ function spaceinvaders() {
     ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`)
     const scores = document.getElementById("Scores")!; 
     scores.textContent = `Score: ${s.score}`
+    const levels = document.getElementById("Level")!; 
+    levels.textContent = `Level: ${s.level + 1}`
 
     if(s.gameOver){subscription.unsubscribe()}
     
-    const updateBulletView = (b: gameObjects) => {
-       function createBulletView(){
-        const v = document.createElementNS(svg.namespaceURI, "rect")!;
-        //Can use Objects.Entries
-        v.setAttribute("id", `${b.id}`)
-        v.setAttribute("width", `${b.objWidth}`)
-        v.setAttribute("height", `${b.objHeight}`)
-        v.setAttribute("fill", "white")
-        v.classList.add("Bullets")
-        svg.appendChild(v)
-        return v
-      }
-      const v = document.getElementById(b.id) || createBulletView();
-      v.setAttribute("x", `${b.pos.x}`) //50 to offset from ship position, do not want to ruin other places values
-      v.setAttribute("y", `${b.pos.y}`)
-    };
 
-    s.shipBullets.forEach(updateBulletView)
-
-    const updateAlienView = (b: gameObjects) => {
-    function createAlienView(){
+    const updateRectView = (b: gameObjects, classType: string) => {
+    function createRectView(){
       const v = document.createElementNS(svg.namespaceURI, "rect")!;
       //Can use Objects.Entries
       v.setAttribute("id", `${b.id}`)
       v.setAttribute("width", `${b.objWidth}`)
       v.setAttribute("height", `${b.objHeight}`)
       v.setAttribute("fill", "white")
-      v.classList.add("Aliens")
+      v.classList.add(classType)
       svg.appendChild(v)
       return v
     }
-    const v = document.getElementById(b.id) || createAlienView() ;
+    const v = document.getElementById(b.id) || createRectView() ;
     v.setAttribute("x", `${b.pos.x}`) 
     v.setAttribute("y", `${b.pos.y}`)
     };
 
-    s.aliens.forEach(updateAlienView)
-    s.shields.forEach(updateAlienView)
-    s.alienBullets.forEach(updateBulletView)
+    s.shipBullets.forEach(x => updateRectView(x, "ShipBullets"))
+    s.aliens.forEach(x => updateRectView(x, "Aliens"))
+    s.shields.forEach(x => updateRectView(x, "Shields"))
+    s.alienBullets.forEach(x => updateRectView(x, "AlienBullets"))
 
     s.exit.map(o=>document.getElementById(o.id))
           .filter((item) => item !== null || undefined) //isNotNullorUndefined
-          .forEach(v=>{
-            try {
-              svg.removeChild(v)
-            } catch(e) {
-              // rarely it can happen that a bullet can be in exit 
-              // for both expiring and colliding in the same tick,
-              // which will cause this exception
-              console.log("Already removed: "+v.id)
-            }
-          })
+          .forEach(v=>{try {svg.removeChild(v)} catch(e) {console.log("Already removed: "+v.id)}})
   }
 
 
@@ -335,28 +337,33 @@ function spaceinvaders() {
   }
 
   //Simple pseudo RAS, Random Alien Selector 
-  class RAS {
-    readonly m = 0x80000000
-    readonly a = 1103515245
-    readonly c = 12345
-    constructor(readonly state: number){}
-    int(){
-      return (this.a + this.state + this.c) % this.m;
+  class RNG {
+    // LCG using GCC's constants
+    m = 0x80000000// 2**31
+    a = 1103515245
+    c = 12345
+    state:number
+    constructor(seed: number) { //Added number to silence warning
+      this.state = seed ? seed : Math.floor(Math.random() * (this.m - 1));
     }
-    float(){
-      return this.int() / (this.m - 1); 
+    nextInt() {
+      this.state = (this.a * this.state + this.c) % this.m;
+      return this.state;
     }
-    next(){
-      return new RAS(this.int())
+    nextFloat() {
+      // returns in range [0,1]
+      return this.nextInt() / (this.m - 1);
     }
-  } 
+  }
 
   //Lazy Sequence Number generator
   function randomAlienSelector(arr: Readonly<gameObjects[]>, seed: number): gameObjects{
-    const rasObj = new RAS(arr.length)
-    const selector = arr[Math.floor(Math.random() * arr.length)] //Math.random() implementation is cringe
+    const rngObj = new RNG(seed) //constant
+    const selector = arr[Math.floor(rngObj.nextFloat() * arr.length)] 
     return selector
   }
+
+  
 
 }
   
