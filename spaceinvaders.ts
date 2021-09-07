@@ -1,4 +1,4 @@
-import {fromEvent, interval} from 'rxjs';
+import {fromEvent, interval, zip} from 'rxjs';
 import {map, filter, scan, merge, repeatWhen} from 'rxjs/operators'; 
 
 
@@ -19,8 +19,8 @@ function spaceinvaders() {
     AlienVelocity: 0.5, 
     AlienWidth: 30,
     AlienHeight: 10,
-    AlienColumns: 4, 
-    AlienRows: 4,
+    AlienColumns: 2, 
+    AlienRows: 2,
     BulletExpirationTime: 100, 
     BulletWidth: 3,
     BulletLength: 12, 
@@ -40,6 +40,7 @@ function spaceinvaders() {
   class Tick {constructor(public readonly elapsed: number) {}}
   class Motion {constructor(public readonly direction: number) {}}
   class Shoot{constructor(){}}
+  class alienShoot{constructor(public readonly shooters: number[]){}}
   class Restart{constructor(){}}
 
   class LinearMotion{
@@ -50,6 +51,23 @@ function spaceinvaders() {
 
     static Zero = new LinearMotion();
  }
+
+ class RNG {
+  // LCG using GCC's constants
+  m = 0x80000000// 2**31
+  a = 1103515245
+  c = 12345
+  constructor(readonly state: number){} 
+  int (){
+    return (this.a * this.state + this.c) % this.m; 
+  }
+  float() {
+    return this.int() / (this.m - 1);
+  }
+  next(){
+    return new RNG(this.int())
+  }
+}
 
   type ObjectID = Readonly<{
     id: string, 
@@ -94,13 +112,13 @@ function spaceinvaders() {
     restarted: false,
   }>
 
-  const createStatic = (sP: staticGroup) =>
-  [...Array(sP.rows * sP.columns).keys()].map(
+  const createStatic = (sP: staticGroup, level: number) =>
+  [...Array((sP.rows + level) * (sP.columns + level)).keys()].map(
     (val, index) => 
     ({
-      id: String(Math.floor(val/sP.rows)) + String(index % sP.columns) + sP.vT,
+      id: String(Math.floor(val/(sP.rows + level))) + String(index % (sP.columns + level)) + sP.vT,
       createTime: 0,
-      pos: new LinearMotion(sP.x_start + index % sP.columns * sP.x_offset, sP.y_start + Math.floor(val/sP.rows) * sP.y_offset),
+      pos: new LinearMotion(sP.x_start + index % (sP.columns + level) * sP.x_offset, sP.y_start + Math.floor(val/(sP.rows + level)) * sP.y_offset),
       velocity: sP.velocity,
       objHeight: sP.staticHeight,
       objWidth: sP.staticWidth
@@ -141,11 +159,11 @@ function spaceinvaders() {
             objHeight: constants.ShipHeight, 
             objWidth: constants.ShipWidth
           }, 
-    shields: createStatic(staticShield),
+    shields: createStatic(staticShield, 0),
     shipBullets: [],
     alienBullets: [], 
     exit: [], 
-    aliens: createStatic(staticAlien), 
+    aliens: createStatic(staticAlien, 0), 
     objCount: 0, 
     gameOver: false,
     level: 0,
@@ -163,6 +181,12 @@ function spaceinvaders() {
   const shoot = observeKey('keydown', 'w', ()=>new Shoot())
   const restartGame = observeKey('keydown', 'r', () => new Restart())
 
+  const alienShootStream = (seed: number) => interval(1000).pipe(
+    scan((r,_) => r.next(), new RNG(seed)),
+    map(r => r.float())
+  )
+  const randomObservable = zip(alienShootStream(1), alienShootStream(2), alienShootStream(3), alienShootStream(4), alienShootStream(5)).pipe(map(x => new alienShoot(x)))
+
   function wrapAround({x, y}: LinearMotion): LinearMotion{
     const size = constants.CanvasSize 
     const wrapped = (position_x: number) => position_x + constants.ShipWidth > size ? position_x - size : position_x < 0 ? position_x + size : position_x 
@@ -170,7 +194,7 @@ function spaceinvaders() {
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart) => 
+  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart|alienShoot) => 
     e instanceof Motion ? {
       ...s, 
       ship: {...s.ship, velocity: e.direction}
@@ -193,8 +217,21 @@ function spaceinvaders() {
       time: 0,
       exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens),
       restarted: true
-    } :
-    tick(s)
+    } : 
+    e instanceof alienShoot ? {
+      ...s,
+      alienBullets: s.aliens.length > 0 ? [...Array(5)].map(
+        (_, i) => ({
+          id: i + "alienBullets",
+          createTime: s.time,
+          pos: s.aliens[e.shooters.map(x => Math.floor(x * s.aliens.length))[i]].pos.add(new LinearMotion(constants.AlienWidth/2, constants.AlienHeight)), 
+          velocity: constants.BulletVelocity * (s.level + 1), 
+          objHeight: constants.BulletLength,
+          objWidth: constants.BulletWidth
+        }) 
+      ): [] 
+    }:
+      tick(s)
 
   function collisionCheck([a, b] : [gameObjects, gameObjects]): boolean{
     return a.pos.x < b.pos.x + b.objWidth
@@ -248,20 +285,10 @@ function spaceinvaders() {
     activeShipBullets:gameObjects[] = s.shipBullets.filter(notExpired),
     activeAlienBullets:gameObjects[] = s.alienBullets.filter(notExpired),
     expiredAlienBullets:gameObjects[] = s.alienBullets.filter(expired),
-    expiredShipBullets:gameObjects[] = s.shipBullets.filter(expired),
+    expiredShipBullets:gameObjects[] = s.shipBullets.filter(expired)
 
-    alienBullets: gameObjects[] = s.aliens.length > 0 ? s.time % 100 === 0 ? [...Array(s.level + s.alienMultiplier)].map(
-      (_, i) => ({
-        id: i + "alienBullets",
-        createTime: s.time,
-        pos: randomAlienSelector(s.aliens, i).pos.add(new LinearMotion(constants.AlienWidth/2, constants.AlienHeight)), //offset for alien bullet
-        velocity: constants.BulletVelocity, 
-        objHeight: constants.BulletLength,
-        objWidth: constants.BulletWidth
-      }) 
-    ): [] : []
-
-    const stateToReturn = s.aliens.length === 0 ? <State>{
+    const stateToReturn = s.level < 3 ? s.gameOver ? <State>{...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets)} 
+    : s.aliens.length === 0 ? <State>{
       time: 0,
       ship: {
               id: "playerShip", 
@@ -271,28 +298,28 @@ function spaceinvaders() {
               objHeight: constants.ShipHeight, 
               objWidth: constants.ShipWidth
             }, 
-      shields: createStatic(staticShield),
+      shields: createStatic(staticShield, s.level + 1),
       shipBullets: [],
       alienBullets: [], 
-      exit: [], 
-      aliens: createStatic(staticAlien), 
+      exit: s.alienBullets.concat(s.shipBullets), 
+      aliens: createStatic(staticAlien, s.level + 1), 
       objCount: 0, 
       gameOver: false,
       level: s.level + 1,
       alienMultiplier: 3,
-      score: 0,
+      score: s.score,
       restarted: false
-    } : s.gameOver ? <State>{...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets)} :
+    } :
      handleCollisions(<State>{
       ...s,
       time: s.time + 1,
       ship:{...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0)))},
       shipBullets: activeShipBullets, 
-      alienBullets: activeAlienBullets.concat(alienBullets),
+      alienBullets: activeAlienBullets,
       exit: expiredShipBullets.concat(expiredAlienBullets),
       aliens: s.aliens.map(moveAliens),
       restarted: false
-    })
+    }) : {...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets), gameOver: true}
 
     return stateToReturn
   }
@@ -306,7 +333,7 @@ function spaceinvaders() {
   
   const subscription = interval(10).pipe(
     map(elapsed => new Tick(elapsed)),
-    merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot, restartGame),
+    merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot, restartGame, randomObservable),
     scan(reduceState, initialState))
     .subscribe(updateView)
 
@@ -323,12 +350,12 @@ function spaceinvaders() {
       const v = document.getElementById("gameover")
       if (v === null){
         const v = document.createElementNS(svg.namespaceURI, "text")!;
-        v.setAttribute('x', '75'),
+        v.setAttribute('x', '50'),
         v.setAttribute('y', '300'),
         v.setAttribute('fill', 'white')
-        v.setAttribute('font-size', '25')
+        v.setAttribute('font-size', '15')
         v.setAttribute('id', "gameover")
-        v.textContent = "Game Over: Press R to restart the game :)";
+        v.textContent = "Game Over (Died or Reached Max Level 3!): Press R to restart the game :)";
         svg.appendChild(v);
       }
     }
@@ -378,33 +405,6 @@ function spaceinvaders() {
   }
 
   //Simple pseudo RAS, Random Alien Selector 
-  class RNG {
-    // LCG using GCC's constants
-    m = 0x80000000// 2**31
-    a = 1103515245
-    c = 12345
-    state:number
-    constructor(seed: number) { //Added number to silence warning
-      this.state = seed ? seed : Math.floor(Math.random() * (this.m - 1));
-    }
-    nextInt() {
-      this.state = (this.a * this.state + this.c) % this.m;
-      return this.state;
-    }
-    nextFloat() {
-      // returns in range [0,1]
-      return this.nextInt() / (this.m - 1);
-    }
-  }
-
-  //Lazy Sequence Number generator
-  function randomAlienSelector(arr: Readonly<gameObjects[]>, seed: number): gameObjects{
-    const rngObj = new RNG(seed) //constant
-    const selector = arr[Math.floor(rngObj.nextFloat() * arr.length)] 
-    return selector
-  }
-
-  
 
 }
   
