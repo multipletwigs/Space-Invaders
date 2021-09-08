@@ -154,12 +154,13 @@ function spaceinvaders() {
     ({
       id: String(Math.floor(val/(sP.rows + level))) + String(index % (sP.columns + level)) + sP.vT,
       createTime: 0,
-      pos: new LinearMotion(sP.x_start + index % (sP.columns + level) * sP.x_offset, sP.y_start + Math.floor(val/(sP.rows + level)) * sP.y_offset),
+      pos: new LinearMotion(sP.x_start + index % (sP.columns + level) * (sP.x_offset -(40 * level)), sP.y_start + Math.floor(val/(sP.rows + level)) * (sP.y_offset - (10 * level))),
       velocity: sP.velocity,
       objHeight: sP.staticHeight,
       objWidth: sP.staticWidth
     }))
   
+  //Static Shield initializations
   const staticShield: staticGroup = {
     vT: "shields",
     rows: constants.ShieldRow,
@@ -172,6 +173,7 @@ function spaceinvaders() {
     staticHeight: constants.ShieldHeight,
     staticWidth: constants.ShieldWidth
   }
+  //Static Alien initializations
   const staticAlien: staticGroup = {
     vT: "alien",
     rows: constants.AlienRows,
@@ -179,11 +181,12 @@ function spaceinvaders() {
     velocity: constants.AlienVelocity,  
     x_start: 100,  
     y_start: 50, 
-    x_offset: 100,  
+    x_offset: 150,  
     y_offset: 50, 
     staticHeight: constants.AlienHeight,
     staticWidth: constants.AlienWidth
   }
+  //Initial States of the model
   const initialState: State = {
     time: 0,
     ship: {
@@ -206,44 +209,80 @@ function spaceinvaders() {
   }
 
   /**
-   * 
-   * @param e 
-   * @param k 
-   * @param result 
-   * @returns 
+   * * observeKey function (Pure function)
+   * @param e Takes in an Event Type that determines the return object
+   * @param k Takes in a specified Key Type
+   * @param result The transformation process of the key event into an object of classes defined above
+   * @returns An observable stream of objects of classes defined above
+   * * Source: FRP Asteroids, handling more inputs section
    */
-  const observeKey = <T>(e: Event, k: Key, result: () => T) => fromEvent<KeyboardEvent>(document, e).pipe(filter(({key}) => key === k),filter(({repeat}) => !repeat), map(result))
+  const observeKey = <T>(e: Event, k: Key, result: () => T) => fromEvent<KeyboardEvent>(document, e).
+                                                               pipe(filter(({key}) => key === k),
+                                                               filter(({repeat}) => !repeat), 
+                                                               map(result))
                      
-  const startLeftMove = observeKey('keydown', 'a', () => new Motion(-constants.ShipVelocity)) //
-  const startRightMove = observeKey('keydown', 'd', () => new Motion(constants.ShipVelocity)) //
-  const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0)) //
-  const stopRightMove = observeKey('keyup', 'd', () => new Motion(0)) //
-  const shoot = observeKey('keydown', 'w', ()=>new Shoot()) //
-  const restartGame = observeKey('keydown', 'r', () => new Restart()) //
+  const startLeftMove = observeKey('keydown', 'a', () => new Motion(-1)) 
+  const startRightMove = observeKey('keydown', 'd', () => new Motion(1)) 
+  const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0)) 
+  const stopRightMove = observeKey('keyup', 'd', () => new Motion(0)) 
+  const shoot = observeKey('keydown', 'w', ()=>new Shoot()) 
+  const restartGame = observeKey('keydown', 'r', () => new Restart()) 
 
+  /**
+   * * alienShootStream function (Pure function)
+   * @param seed A random number for seeding. 
+   * @returns A seedable observable stream of pseudorandom floats. 
+   * * Source: piApproximation Video, randomnumberstream section by Tim Dywer
+   */
   const alienShootStream = (seed: number) => interval(1000).pipe(
     scan((r,_) => r.next(), new RNG(seed)),
     map(r => r.float())
   )
+
+  /**
+   * There are a total of 5 different alienShootStreams here each with a fixed seed. 
+   * The stream is "zipped" into an array of five pseudorandom floats in which each is mapped to be AlienShoot objects.
+   * We will use the array of pseudorandom floats later to calculate which alien should shoot. 
+   */
   const randomObservable = zip(alienShootStream(1), alienShootStream(2), alienShootStream(3), alienShootStream(4), alienShootStream(5)).pipe(
                            map(x => new AlienShoot(x)))
 
+  /**
+   * * wrapAround function (Pure Function) 
+   * * It is used to "teleport" the ship to the left/right side of the canvas if the ship ever reaches the other side. 
+   * * The ship is smoothly wrapped from one side to another eventhough it keeps "flashing". This is due to how the function checks a position has
+   * * reached one of the canvas edges. However, I have decided to kept it because the wrapping feels smoother compared to instantly teleporting around. 
+   * @param param0 A parameter which is the destructuring of Linear Motion readonly class variables, consisting of x, y positions of an object.
+   * @returns a new LinearMotion object that specifies the position of the ship.
+   */
   function wrapAround({x, y}: LinearMotion): LinearMotion{
     const size = constants.CanvasSize 
     const wrapped = (position_x: number) => position_x + constants.ShipWidth > size ? position_x - size : position_x < 0 ? position_x + size : position_x 
-
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart|AlienShoot) => 
+  /**
+   * * reduceState function (Pure function)
+   * @param s Takes in a previous game state.
+   * @param e Takes in a different action trigger that are objects of action classes above.
+   * @returns Depending on what kind of action trigger, a different state is returned. Details of each
+   *          different returns are as below.
+   * If instanceof... 
+   * @Motion returns a new state such that the velocity of the ship is adjusted to the direction of the ship where everything remains.
+   * @Shoot returns a new state such that a new ShipBullet type gameObject is created, and appended to the array that stores AlienBullets.
+   * @Restart returns a new state such any active gameObjects are removed by appending to exit, and initialState is restored through ...initialState.
+   * @AlienShoot returns a new state such that a new array of AlienBullet typed gameObjects are created pseudorandomly based off the position of the alienArray.
+   *             This will only happen if the number of aliens in the alien array are larger than 0. 
+   * @else call the function tick which has a new State return annotation type. 
+   */
+  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart|AlienShoot): State => 
     e instanceof Motion ? {
       ...s, 
-      ship: {...s.ship, velocity: e.direction}
+      ship: {...s.ship, velocity: constants.ShipVelocity * e.direction}
     } : 
     e instanceof Shoot? {
       ...s, 
-      shipBullets: s.shipBullets.concat(
-        [{
+      shipBullets: s.shipBullets.concat([{
           id: String(s.objCount) + "shipBullets", 
           createTime: s.time, 
           pos: s.ship.pos.add(new LinearMotion(50, 0)), //offset
@@ -256,8 +295,7 @@ function spaceinvaders() {
     e instanceof Restart ?{
       ...initialState,
       time: 0,
-      exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens),
-      restarted: true
+      exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens)
     } : 
     e instanceof AlienShoot ? {
       ...s,
@@ -270,28 +308,34 @@ function spaceinvaders() {
           objHeight: constants.BulletLength,
           objWidth: constants.BulletWidth
         }) 
-      ): [] 
-    }:
+      ) : [] 
+    } :
       tick(s)
 
+  /**
+   * * collisionCheck function (Pure Function)
+   * @param param0 Takes in an array of gameObjects consisting of two gameObjects in which it is destructured into [a,b]
+   * @returns true if a and b are colliding, else false. 
+   * * Source: https://developer.mozilla.org/en-US/docs/Games/Techniques/2D_collision_detection
+   */
   function collisionCheck([a, b] : [gameObjects, gameObjects]): boolean{
     return a.pos.x < b.pos.x + b.objWidth
     && a.pos.x + a.objWidth > b.pos.x 
     && a.pos.y < b.pos.y + b.objHeight
     && a.pos.y + a.objHeight > b.pos.y
   }
-  
+
   const handleCollisions = (s: State): State => {
     const 
     allBulletsAndAliens = flatMap(s.shipBullets, b=> s.aliens.map<[gameObjects, gameObjects]>(r=>([b,r]))),
-    allBulletsAndShip = s.alienBullets.map(x => [x, s.ship]),
+    //allBulletsAndShip = s.alienBullets.map(x => [x, s.ship]),
     allAlienBulletsAndShield = flatMap(s.alienBullets, shield => s.shields.map<[gameObjects, gameObjects]>(r => ([r, shield]))) 
 
     const colliderFilter = (arr: ReadonlyArray<gameObjects[]>, colliderLogic: (entry: [gameObjects,gameObjects]) => boolean) => {
       return <ReadonlyArray<gameObjects[]>>arr.filter(colliderLogic)
     },
 
-    collidedBulletsAndShip = colliderFilter(allBulletsAndShip, collisionCheck),
+    //collidedBulletsAndShip = colliderFilter(allBulletsAndShip, collisionCheck),
     collidedBulletsAndAliens = colliderFilter(allBulletsAndAliens, collisionCheck),
     collidedAlienBulletsAndShield = colliderFilter(allAlienBulletsAndShield, collisionCheck),
 
@@ -310,7 +354,7 @@ function spaceinvaders() {
       aliens: activeAliens,
       exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
       score: s.score + collidedAliens.length,
-      gameOver: collidedBulletsAndShip.length > 0 ? true: false
+      //gameOver: collidedBulletsAndShip.length > 0 ? true: false
     }
   }
   
@@ -339,7 +383,7 @@ function spaceinvaders() {
               objHeight: constants.ShipHeight, 
               objWidth: constants.ShipWidth
             }, 
-      shields: createStatic(staticShield, s.level + 1),
+      shields: createStatic(staticShield, 0),
       shipBullets: [],
       alienBullets: [], 
       exit: s.alienBullets.concat(s.shipBullets), 
@@ -348,7 +392,6 @@ function spaceinvaders() {
       gameOver: false,
       level: s.level + 1,
       score: s.score,
-      restarted: false
     } :
      handleCollisions(<State>{
       ...s,
@@ -358,7 +401,6 @@ function spaceinvaders() {
       alienBullets: activeAlienBullets,
       exit: expiredShipBullets.concat(expiredAlienBullets),
       aliens: s.aliens.map(moveAliens),
-      restarted: false
     }) : {...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets), gameOver: true}
 
     return stateToReturn
@@ -443,8 +485,6 @@ function spaceinvaders() {
   ): ReadonlyArray<U> {
     return Array.prototype.concat(...a.map(f));
   }
-
-  //Simple pseudo RAS, Random Alien Selector 
 
 }
   
