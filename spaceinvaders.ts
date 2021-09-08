@@ -1,26 +1,24 @@
 import {fromEvent, interval, zip} from 'rxjs';
-import {map, filter, scan, merge, repeatWhen} from 'rxjs/operators'; 
-
-
-/* Things TO-DO 
-1. Alien Randomizer needs fixing
-2. Question on drawing ontop while ignoring the rectangle 
-
-Optimization: 
-1. Generalize flatMapped function 
-*/
+import {map, filter, scan, merge} from 'rxjs/operators'; 
 
 function spaceinvaders() {
-  type Event = "keydown" | "keyup"
-  type Key = "a" | "d" | "w" | "r"
-  type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship" | "shields"
+  
+  //Only two KeyboardEvents are ever used in this game  
+  type Event = "keydown" | "keyup" 
 
+  //These are the only four keys used as controls 
+  type Key = "a" | "d" | "w" | "r" //These are the only four keys used as controls 
+
+  //Objects in the game are split these kinds. This is used to facilitate ID creation for each game objects. 
+  type ViewType = "alienBullet" | "shipBullet" | "alien" | "ship" | "shields" 
+
+  //CONSTANTS USED THROUGHOUT THE PROGRAM, VARIABLE NAME ARE SELF-EXPLANATORY
   const constants = {
     AlienVelocity: 0.5, 
     AlienWidth: 30,
     AlienHeight: 10,
-    AlienColumns: 2, 
-    AlienRows: 2,
+    AlienColumns: 3, 
+    AlienRows: 3,
     BulletExpirationTime: 100, 
     BulletWidth: 3,
     BulletLength: 12, 
@@ -36,13 +34,28 @@ function spaceinvaders() {
     ShieldHeight: 5, 
     ShieldWidth: 150
   } as const 
+  //CONSTANTS USED THROUGHOUT THE PROGRAM, VARIABLE NAMES ARE SELF-EXPLANATORY
 
+  /** 
+  * Each of these classes correspond to a certain action type that the game can perform. 
+  * Classes are used here due to the instanceof pattern matching inside reduceState. 
+  * @Tick Acts as a game clock that keep tracks of time within the game. 
+  * @Motion Determines which direction should the ship move. Also used to stop the ship. 
+  * @Shoot Acts as a trigger that enables bullet emission. 
+  * @AlienShoot Stores an array of randomly generated number from the RNG class below. 
+  * @Restart Acts as a trigger to determine when the user has decided to restart the game.
+  * Source: Taken from FRP Asteroids Course Notes, input action section. 
+  */
   class Tick {constructor(public readonly elapsed: number) {}}
   class Motion {constructor(public readonly direction: number) {}}
   class Shoot{constructor(){}}
-  class alienShoot{constructor(public readonly shooters: number[]){}}
+  class AlienShoot{constructor(public readonly shooters: number[]){}}
   class Restart{constructor(){}}
 
+  /**
+  * @LinearMotion Class similar to the Vec Class in FRP Asteroids Course Notes that models linear motion. 
+  * Source: Taken from FRP Asteroids, Vector Maths section. 
+  */
   class LinearMotion{
     constructor(public readonly x: number = 0, public readonly y: number = 0){}
     add = (b: LinearMotion) => new LinearMotion(this.x + b.x, this.y + b.y);
@@ -52,7 +65,11 @@ function spaceinvaders() {
     static Zero = new LinearMotion();
  }
 
- class RNG {
+  /**
+  * @RNG A simple, seedable Random Number Generator. 
+  * Source: Taken from PiApproximation Video on YouTube by Tim Dwyer. 
+  */
+  class RNG {
   // LCG using GCC's constants
   m = 0x80000000// 2**31
   a = 1103515245
@@ -66,52 +83,71 @@ function spaceinvaders() {
   }
   next(){
     return new RNG(this.int())
-  }
-}
+   }
+ }
 
+  /**
+  * Objects in the games are generalized under @gameObjects type. 
+  * An object type correspond to a @viewType above.  
+  * A detailed description will be included as comments below. 
+  */
   type ObjectID = Readonly<{
-    id: string, 
+    //Each game object will have a unique ID and a creation time
+    id: string,         
     createTime: number 
   }>
-
-  type staticGroup =Readonly<{
-    vT: ViewType,
-    rows: number,
-    columns: number,  
-    velocity: number,  
-    x_start: number,  
-    y_start: number, 
-    x_offset: number,  
-    y_offset:number,
-    staticHeight: number, 
-    staticWidth: number
-  }>
-
   interface gameObjectsI extends ObjectID {
+    //Only gameObjects will have the properties below
     pos: LinearMotion,
     velocity: number,
     objHeight: number,
     objWidth: number
   }
-
+  //A wrapper for the gameObjectsI interface, so gameObjects is a legitimate type and can be used for type annotations
   type gameObjects = Readonly<gameObjectsI>
 
+  /**
+  * The game is built using the Model-View-Controller architecture. 
+  * Each game state is unique at each tick of the game clock which consists
+  * of the properties below. 
+  * Description of unusual properties below. 
+  */
   type State = Readonly<{
-    time: number,
-    ship: gameObjects,
-    shields: ReadonlyArray<gameObjects>,
-    shipBullets: ReadonlyArray<gameObjects>,
+    time: number, //Discrete timestep for each MVC cycle. 
+    ship: gameObjects, 
+    shields: ReadonlyArray<gameObjects>, 
+    shipBullets: ReadonlyArray<gameObjects>, 
     alienBullets: ReadonlyArray<gameObjects>,
-    exit: ReadonlyArray<gameObjects>, 
+    exit: ReadonlyArray<gameObjects>, //Collection of game objects to be removed from the game visually
     aliens: ReadonlyArray<gameObjects>,
-    objCount: number, 
+    objCount: number, //Total object counts in the game
     gameOver: boolean, 
-    level: number, //Later implementation for new levels
-    alienMultiplier: number,
-    score: number,
-    restarted: false,
+    level: number, //Game difficulty indicator, a higher levels means more aliens and alien bullets go faster. 
+    score: number //One alien killed means 1 score. 
   }>
 
+  /**
+  * The following type staticGroup is a type for initialstate positioning for static items during the start state. 
+  * Description of unusual properties below. 
+  */
+  type staticGroup =Readonly<{
+    vT: ViewType,
+    rows: number,     //number of rows for a particular staticGroup
+    columns: number,  //number of rows for a particular staticGroup
+    velocity: number, 
+    x_start: number,  //The starting x_position of the top-most left static item
+    y_start: number,  //The starting y_position of the top-most left static item 
+    x_offset: number, //The offset of x_position for each subsequent column of aliens, in other words, how far should each alien be apart from each other horizontally
+    y_offset:number,  //The offset of y_position for each subsequent row of aliens, how far should each alien be apart from each other vertically
+    staticHeight: number, //gameObject height property
+    staticWidth: number //gameObject height property
+  }>
+
+  /**
+  * @param sP:StaticGroup Takes in staticGroup type  
+  * @param level:number A value that determines the rows and columns of the game, the larger this value the more aliens there are 
+  * @returns An array of gameObjects with the initialized properties. 
+  */
   const createStatic = (sP: staticGroup, level: number) =>
   [...Array((sP.rows + level) * (sP.columns + level)).keys()].map(
     (val, index) => 
@@ -123,7 +159,7 @@ function spaceinvaders() {
       objHeight: sP.staticHeight,
       objWidth: sP.staticWidth
     }))
-
+  
   const staticShield: staticGroup = {
     vT: "shields",
     rows: constants.ShieldRow,
@@ -136,7 +172,6 @@ function spaceinvaders() {
     staticHeight: constants.ShieldHeight,
     staticWidth: constants.ShieldWidth
   }
-
   const staticAlien: staticGroup = {
     vT: "alien",
     rows: constants.AlienRows,
@@ -167,25 +202,31 @@ function spaceinvaders() {
     objCount: 0, 
     gameOver: false,
     level: 0,
-    alienMultiplier: 3,
-    score: 0,
-    restarted: false
+    score: 0
   }
 
+  /**
+   * 
+   * @param e 
+   * @param k 
+   * @param result 
+   * @returns 
+   */
   const observeKey = <T>(e: Event, k: Key, result: () => T) => fromEvent<KeyboardEvent>(document, e).pipe(filter(({key}) => key === k),filter(({repeat}) => !repeat), map(result))
                      
-  const startLeftMove = observeKey('keydown', 'a', () => new Motion(-constants.ShipVelocity))
-  const startRightMove = observeKey('keydown', 'd', () => new Motion(constants.ShipVelocity))
-  const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0))
-  const stopRightMove = observeKey('keyup', 'd', () => new Motion(0))
-  const shoot = observeKey('keydown', 'w', ()=>new Shoot())
-  const restartGame = observeKey('keydown', 'r', () => new Restart())
+  const startLeftMove = observeKey('keydown', 'a', () => new Motion(-constants.ShipVelocity)) //
+  const startRightMove = observeKey('keydown', 'd', () => new Motion(constants.ShipVelocity)) //
+  const stopLeftMove = observeKey('keyup', 'a', () => new Motion(0)) //
+  const stopRightMove = observeKey('keyup', 'd', () => new Motion(0)) //
+  const shoot = observeKey('keydown', 'w', ()=>new Shoot()) //
+  const restartGame = observeKey('keydown', 'r', () => new Restart()) //
 
   const alienShootStream = (seed: number) => interval(1000).pipe(
     scan((r,_) => r.next(), new RNG(seed)),
     map(r => r.float())
   )
-  const randomObservable = zip(alienShootStream(1), alienShootStream(2), alienShootStream(3), alienShootStream(4), alienShootStream(5)).pipe(map(x => new alienShoot(x)))
+  const randomObservable = zip(alienShootStream(1), alienShootStream(2), alienShootStream(3), alienShootStream(4), alienShootStream(5)).pipe(
+                           map(x => new AlienShoot(x)))
 
   function wrapAround({x, y}: LinearMotion): LinearMotion{
     const size = constants.CanvasSize 
@@ -194,7 +235,7 @@ function spaceinvaders() {
     return new LinearMotion(wrapped(x), y)
   }
 
-  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart|alienShoot) => 
+  const reduceState = (s: State, e: Motion|Tick|Shoot|Restart|AlienShoot) => 
     e instanceof Motion ? {
       ...s, 
       ship: {...s.ship, velocity: e.direction}
@@ -218,7 +259,7 @@ function spaceinvaders() {
       exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens),
       restarted: true
     } : 
-    e instanceof alienShoot ? {
+    e instanceof AlienShoot ? {
       ...s,
       alienBullets: s.aliens.length > 0 ? [...Array(5)].map(
         (_, i) => ({
@@ -306,7 +347,6 @@ function spaceinvaders() {
       objCount: 0, 
       gameOver: false,
       level: s.level + 1,
-      alienMultiplier: 3,
       score: s.score,
       restarted: false
     } :
