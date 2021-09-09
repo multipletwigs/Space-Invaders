@@ -20,13 +20,20 @@ function spaceinvaders() {
     AlienColumns: 3,
     AlienRows: 3,
     AlienBulletVelocity: 4,
+    AlienShooterNumber: 3,
+    AlienStartXPos: 100,
+    AlienStartYPos: 50,
+    AlienShiftDown: 10,
+    AlienXOffset: 150, 
+    AlienYOffset: 50,
     BulletExpirationTime: 1000,
     BulletWidth: 3,
     BulletLength: 12,
     BulletVelocity: 4,
+    CanvasSize: 600,
+    MaxLevel: 3,
     ShipWidth: 77,
     ShipHeight: 70.15,
-    CanvasSize: 600,
     StartTime: 0,
     ShipStartPos: { x: 253, y: 500 },
     ShipVelocity: 2,
@@ -34,7 +41,14 @@ function spaceinvaders() {
     ShieldRow: 3,
     ShieldHeight: 5,
     ShieldWidth: 150,
-    MaxLevel: 3
+    ShieldStartXPos: 25,
+    ShieldStartYPos: 450,
+    ShieldXOffset: 200, 
+    ShieldYOffset: 10,
+    HardLeftBorder: 80,
+    HardRightBorder: 500,
+    TextXPosition: 50,
+    TextYPosition: 300
   } as const
   //CONSTANTS USED THROUGHOUT THE PROGRAM, VARIABLE NAMES ARE SELF-EXPLANATORY
 
@@ -172,10 +186,10 @@ function spaceinvaders() {
     columns: constants.ShieldColumn,
     velocity: 0,
     dir: 0,
-    x_start: 25,
-    y_start: 450,
-    x_offset: 200,
-    y_offset: 10,
+    x_start: constants.ShieldStartXPos,
+    y_start: constants.ShieldStartYPos,
+    x_offset: constants.ShieldXOffset,
+    y_offset: constants.ShieldYOffset,
     staticHeight: constants.ShieldHeight,
     staticWidth: constants.ShieldWidth
   }
@@ -186,10 +200,10 @@ function spaceinvaders() {
     columns: constants.AlienColumns,
     velocity: constants.AlienVelocity,
     dir: 1,
-    x_start: 100,
-    y_start: 50,
-    x_offset: 150,
-    y_offset: 50,
+    x_start: constants.AlienStartXPos,
+    y_start: constants.AlienStartYPos,
+    x_offset: constants.AlienXOffset,
+    y_offset: constants.AlienYOffset,
     staticHeight: constants.AlienHeight,
     staticWidth: constants.AlienWidth
   }
@@ -308,7 +322,7 @@ function spaceinvaders() {
         } :
           e instanceof AlienShoot ? {
             ...s,
-            alienBullets: s.aliens.length > 0 ? [...Array(5)].map( //define as constant for 5
+            alienBullets: s.aliens.length > 0 ? [...Array(constants.AlienShooterNumber)].map(
               (_, i) => ({
                 id: i + "alienBullets",
                 createTime: s.time,
@@ -347,6 +361,7 @@ function spaceinvaders() {
     const
       allBulletsAndAliens = flatMap(s.shipBullets, b => s.aliens.map<[gameObjects, gameObjects]>(r => ([b, r]))),
       allAlienBulletsAndShield = flatMap(s.alienBullets, shield => s.shields.map<[gameObjects, gameObjects]>(r => ([r, shield]))),
+      allAlienBulletAndShipBullet = flatMap(s.alienBullets, bullets => s.shipBullets.map<[gameObjects, gameObjects]>(b => [b, bullets])),
       allBulletsAndShip = s.alienBullets.map(x => [x, s.ship])
 
     /**
@@ -360,96 +375,133 @@ function spaceinvaders() {
         return <ReadonlyArray<gameObjects[]>>arr.filter(colliderLogic)
       },
 
-      //Filtering based on the collision checker
+      //Filtering based on the collision checker however the return value in an array of [gameObjects, gameObjects], further filtering is needed
+      //To select only one of the two gameObjects
       collidedBulletsAndShip = colliderFilter(allBulletsAndShip, collisionCheck),
       collidedBulletsAndAliens = colliderFilter(allBulletsAndAliens, collisionCheck),
       collidedAlienBulletsAndShield = colliderFilter(allAlienBulletsAndShield, collisionCheck),
+      collidedAlienBulletsAndShipBullets = colliderFilter(allAlienBulletAndShipBullet, collisionCheck),
 
-      //Only getting one of the two items from an array 
-      collidedBullets = collidedBulletsAndAliens.map(([bullet, _]) => bullet),
-      collidedAlienBullets = collidedAlienBulletsAndShield.map(([_, bullet]) => bullet),
-      collidedAlienShield = collidedAlienBulletsAndShield.map(([shield, _]) => shield),
-      collidedAliens = collidedBulletsAndAliens.map(([_, aliens]) => aliens),
+      //Only getting one of the two items from an array, filtering from the gameObject[] can be done
+      //We only want shipBullet here because collidedBullets will be removed 
+      collidedShipBullets = collidedBulletsAndAliens.map(([bullet, _]) => bullet).concat(collidedAlienBulletsAndShipBullets.map(([bullet, _]) => bullet)), 
+      collidedAlienBullets = collidedAlienBulletsAndShield.map(([_, bullet]) => bullet).concat(collidedAlienBulletsAndShipBullets.map(([_, bullet]) => bullet)), //We only want alienBullet here because collidedBullets will be removed 
+      collidedAlienShield = collidedAlienBulletsAndShield.map(([shield, _]) => shield), //We only want shield here because collidedShields will be removed 
+      collidedAliens = collidedBulletsAndAliens.map(([_, aliens]) => aliens), //We only want aliens here because collidedAliens will be removed 
 
-      activeAliens = s.aliens.filter(n => !collidedAliens.includes(n))
+      //Obtails active gameObjects that has not collided using includes. Includes here is pure. 
+      activeAliens = s.aliens.filter(n => !collidedAliens.includes(n)),
+      activeShipBullets = s.shipBullets.filter(n => !collidedShipBullets.includes(n)).map(b => bulletMove(b)(-1)),
+      activeAlienBullets = s.alienBullets.filter(n => !collidedAlienBullets.includes(n)).map(b => bulletMove(b)(1)),
+      activeShields = s.shields.filter(n => !collidedAlienShield.includes(n)),
+
+      //All collided objects are to be sent to the exit array so that they can be removed. 
+      toBeRemoved = s.exit.concat(collidedShipBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
+
+      //Has alien touched edge? 
+      touchedEdge = activeAliens.filter((g) => g.pos.y > 600).length > 0 ? true: false,
+
+      //Is the game over? 
+      gameIsOver = touchedEdge || collidedBulletsAndShip.length > 0
 
 
     return <State>{
       ...s,
-      shipBullets: s.shipBullets.filter(n => !collidedBullets.includes(n)).map(b => bulletMove(b)(-1)),
-      alienBullets: s.alienBullets.filter(n => !collidedAlienBullets.includes(n)).map(b => bulletMove(b)(1)),
-      shields: s.shields.filter(n => !collidedAlienShield.includes(n)),
+      shipBullets: activeShipBullets,
+      alienBullets: activeAlienBullets,
+      shields: activeShields,
       aliens: activeAliens,
-      exit: s.exit.concat(collidedBullets, collidedAliens, collidedAlienBullets, collidedAlienShield),
-      score: s.score + collidedAliens.length,
-      gameOver: collidedBulletsAndShip.length > 0 ? true : false
+      exit: toBeRemoved,
+      score: s.score + collidedAliens.length, //Used to update score based on aliens collided 
+      gameOver: gameIsOver //The array collidedBulletsAndShip will always remain 0, unless a bullet hits it. 
+      //If a bullet does hit the ship, its length will be greater than 0, hence the game ends. 
     }
   }
 
+  /**
+   * * tick function (Pure function)
+   * @param s Takes in a state that defines subsequent return states
+   * @returns A different state based off on different conditions of the input state, explained below
+   * * Source: inspired by FRP Asteroids, tick function section, https://tgdwyer.github.io/asteroids/ 
+   */
   const tick = (s: State) => {
     const
-      expired = (g: gameObjects) => (s.time - g.createTime) > constants.BulletExpirationTime,
-      notExpired = (g: gameObjects) => (s.time - g.createTime) <= constants.BulletExpirationTime,
-      passedLeftBorder = (g: gameObjects) => (g.pos.x < 80 ? true : false),   //Hard borders 
-      passedRightBorder = (g: gameObjects) => (g.pos.x > 500 ? true : false), //Hard borders 
+      expired = (g: gameObjects) => (s.time - g.createTime) > constants.BulletExpirationTime, //A small function that checks if a bullet has expired 
+      notExpired = (g: gameObjects) => (s.time - g.createTime) <= constants.BulletExpirationTime, //A small function that does the opposite of expired. 
+      passedLeftBorder = (g: gameObjects) => (g.pos.x < constants.HardLeftBorder ? true : false), //Determines if a gameObject has passed through a hard left border that determines the movement of the alien.   
+      passedRightBorder = (g: gameObjects) => (g.pos.x > constants.HardRightBorder ? true : false), //Does the same as passedLeftBorder
+
+      //Through this function, as aliens on the right gets killed, aliens will also move to the left more, before shifting downwards. 
+
+      //Alien Speed calculation, as more alien dies, the speed of aliens increase. 
+      alienSpeedIncrease = (((constants.AlienRows + s.level) * (constants.AlienColumns + s.level)) - s.aliens.length)/20,
 
       animateAliens = (gArr: Readonly<gameObjects[]>) =>
         gArr.filter(passedLeftBorder).length > 0 ?
-          gArr.map((g) => ({ ...g, dir: 1, pos: new LinearMotion(g.pos.x + 1, g.pos.y + 10) })) :
+          gArr.map((g) => ({ ...g, dir: 1, pos: new LinearMotion(g.pos.x + 1, g.pos.y + constants.AlienShiftDown) })) :
           gArr.filter(passedRightBorder).length > 0 ?
-            gArr.map((g) => ({ ...g, dir: -1, pos: new LinearMotion(g.pos.x - 1, g.pos.y + 10) })) :
-            gArr.map((g) => ({ ...g, pos: new LinearMotion(g.pos.x + (g.velocity) * g.dir, g.pos.y) })),
+            gArr.map((g) => ({ ...g, dir: -1, pos: new LinearMotion(g.pos.x - 1, g.pos.y + constants.AlienShiftDown) })) :
+            gArr.map((g) => ({ ...g, pos: new LinearMotion(g.pos.x + (g.velocity + alienSpeedIncrease) * g.dir, g.pos.y) })),
 
+      //Bullets are filtered out based on if they are expired or not
       activeShipBullets: gameObjects[] = s.shipBullets.filter(notExpired),
       activeAlienBullets: gameObjects[] = s.alienBullets.filter(notExpired),
       expiredAlienBullets: gameObjects[] = s.alienBullets.filter(expired),
       expiredShipBullets: gameObjects[] = s.shipBullets.filter(expired)
 
-    const stateToReturn = s.level < constants.MaxLevel ?
-      s.gameOver ? <State>{ ...s, exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets) }
-        : s.aliens.length === 0 ? <State>{
-          time: 0,
-          ship: {
-            id: "playerShip",
-            pos: new LinearMotion(constants.ShipStartPos.x, constants.ShipStartPos.y),
-            velocity: 0,
-            createTime: 0,
-            dir: 0,
-            objHeight: constants.ShipHeight,
-            objWidth: constants.ShipWidth
-          },
-          shields: createStatic(staticShield, 0),
-          shipBullets: [],
-          alienBullets: [],
-          exit: s.alienBullets.concat(s.shipBullets),
-          aliens: createStatic(staticAlien, s.level + 1),
-          objCount: 0,
-          gameOver: false,
-          level: s.level + 1,
-          score: s.score
-        } :
-          handleCollisions(<State>{
-            ...s,
-            time: s.time + 1,
-            ship: { ...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0))) },
-            shipBullets: activeShipBullets,
-            alienBullets: activeAlienBullets,
-            exit: expiredShipBullets.concat(expiredAlienBullets),
-            aliens: animateAliens(s.aliens)
-          }) : <State>{
-            ...s,
-            shields: [],
+    //There are different states to return based on of different game changing conditions. This will be explained with greater detail in the report. 
+    //Instead of putting the state to return in a constant called stateToReturn, I can easily just directly return the state using the ternary operator. 
+    //However I find putting it in a constant before returning easier to understand. 
+    const stateToReturn =
+      s.level < constants.MaxLevel ?
+        s.gameOver ? <State>{
+          ...s,
+          exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets)
+        }
+          : s.aliens.length === 0 ? <State>{
+            time: 0,
+            ship: {
+              id: "playerShip",
+              pos: new LinearMotion(constants.ShipStartPos.x, constants.ShipStartPos.y),
+              velocity: 0,
+              createTime: 0,
+              dir: 0,
+              objHeight: constants.ShipHeight,
+              objWidth: constants.ShipWidth
+            },
+            shields: createStatic(staticShield, 0),
             shipBullets: [],
             alienBullets: [],
-            exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets),
-            aliens: [],
-            gameOver: true,
-            level: s.level
-          }
+            exit: s.alienBullets.concat(s.shipBullets),
+            aliens: createStatic(staticAlien, s.level + 1),
+            objCount: 0,
+            gameOver: false,
+            level: s.level + 1,
+            score: s.score
+          } :
+            handleCollisions(<State>{
+              ...s,
+              time: s.time + 1,
+              ship: { ...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0))) },
+              shipBullets: activeShipBullets,
+              alienBullets: activeAlienBullets,
+              exit: expiredShipBullets.concat(expiredAlienBullets),
+              aliens: animateAliens(s.aliens)
+            }) : <State>{
+              ...s,
+              shields: [],
+              shipBullets: [],
+              alienBullets: [],
+              exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets),
+              aliens: [],
+              gameOver: true,
+              level: s.level
+            }
 
     return stateToReturn
   }
 
+  //A very simple generalized object movement function that changes direction depending on how much you increase by it
   const bulletMove = (go: gameObjects) => (direction: number) => {
     return {
       ...go,
@@ -457,46 +509,61 @@ function spaceinvaders() {
     }
   }
 
+  //Main stream of observables
   const subscription = interval(10).pipe(
     map(elapsed => new Tick(elapsed)),
     merge(startLeftMove, startRightMove, stopLeftMove, stopRightMove, shoot, restartGame, randomObservable),
     scan(reduceState, initialState))
     .subscribe(updateView)
 
+  /**
+   * * updateView function (impure function)
+   * @param s Changes how the SVG canvas would look like based on the state taken in 
+   * * Source: FRP Asteroids final view section by Tim Dwyer, https://tgdwyer.github.io/asteroids/ 
+   */
   function updateView(s: State) {
-    const ship = document.getElementById("ship")!
-    const svg = document.getElementById("canvas")
-    ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`)
+    const ship = document.getElementById("ship")!;
+    const svg = document.getElementById("canvas")!;
     const scores = document.getElementById("Scores")!;
-    scores.textContent = `Score: ${s.score}`
     const levels = document.getElementById("Level")!;
-    levels.textContent = `Level: ${s.level + 1}`
+    ship.setAttribute('transform', `translate(${s.ship.pos.x}, ${s.ship.pos.y}) matrix(0.15038946 0 0 0.15038946 12.499998 -0)`);
+    scores.textContent = `Score: ${s.score}`;
+    levels.textContent = `Level: ${s.level + 1}`;
 
+    //If the game is over, place text on screen
     if (s.gameOver) {
-      const v = document.getElementById("gameover")
+      const v = document.getElementById("gameover");
+      //If the game is still on going, v will return null as the id of "gameover" is not a child of the parent canvas
+      //If it is not present on the canvas, then draw it. If it is already on the canvas, do nothing. 
       if (v === null) {
         const v = document.createElementNS(svg.namespaceURI, "text")!;
-        v.setAttribute('x', '50'),
-        v.setAttribute('y', '300'),
-        v.setAttribute('fill', 'white')
-        v.setAttribute('font-size', '15')
-        v.setAttribute('id', "gameover")
+        v.setAttribute('x', `${constants.TextXPosition}`);
+        v.setAttribute('y', `${constants.TextYPosition}`);
+        v.setAttribute('fill', 'white');
+        v.setAttribute('font-size', '15');
+        v.setAttribute('id', "gameover");
         v.textContent = "Game Over (Died or Reached Max Level 3!): Press R to restart the game :)";
         svg.appendChild(v);
       }
     }
+    //If the game is not over, aka restarted, the text will be removed. 
     else {
       try {
-        const v = document.getElementById("gameover")
-        svg.removeChild(v)
+        const v = document.getElementById("gameover");
+        svg.removeChild(v);
       } catch (error) { }
     }
 
-
+    /**
+     * * updateRectView, a generalized rectangle view updater (impure function)
+     * @param b takes in a game object and draws it on the SVG canvas depending on its properties. 
+     * @param classType determines how gameObjects are classified by classType. 
+     * * Source: FRP Asteroids, Final View Section, https://tgdwyer.github.io/asteroids/
+     */
     const updateRectView = (b: gameObjects, classType: string) => {
+      //This inner function creates the elements, on the SVG canvas. 
       function createRectView() {
         const v = document.createElementNS(svg.namespaceURI, "rect")!;
-        //Can use Objects.Entries
         v.setAttribute("id", `${b.id}`)
         v.setAttribute("width", `${b.objWidth}`)
         v.setAttribute("height", `${b.objHeight}`)
@@ -510,14 +577,16 @@ function spaceinvaders() {
       v.setAttribute("y", `${b.pos.y}`)
     };
 
-    s.shipBullets.forEach(x => updateRectView(x, "ShipBullets"))
-    s.aliens.forEach(x => updateRectView(x, "Aliens"))
-    s.shields.forEach(x => updateRectView(x, "Shields"))
-    s.alienBullets.forEach(x => updateRectView(x, "AlienBullets"))
+    //Call updateRectView for each rectangular object, which is basically every single gameObject in the game.
+    s.shipBullets.forEach(x => updateRectView(x, "ShipBullets"));
+    s.aliens.forEach(x => updateRectView(x, "Aliens"));
+    s.shields.forEach(x => updateRectView(x, "Shields"));
+    s.alienBullets.forEach(x => updateRectView(x, "AlienBullets"));
 
+    //Cleans out the SVG canvas by removing each element on the canvas according to the exit array.
     s.exit.map(o => document.getElementById(o.id))
       .filter((item) => item !== null || undefined) //isNotNullorUndefined
-      .forEach(v => { try { svg.removeChild(v) } catch (e) { console.log("Already removed: " + v.id) } })
+      .forEach(v => { try { svg.removeChild(v) } catch (e) { console.log("Already removed: " + v.id) } });
   }
 
 
