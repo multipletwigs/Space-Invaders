@@ -26,7 +26,7 @@ function spaceinvaders() {
     AlienShiftDown: 10,
     AlienXOffset: 150, 
     AlienYOffset: 50,
-    BulletExpirationTime: 1000,
+    BulletExpirationTime: 100,
     BulletWidth: 3,
     BulletLength: 12,
     BulletVelocity: 4,
@@ -256,7 +256,7 @@ function spaceinvaders() {
    * @returns A seedable observable stream of pseudorandom floats. 
    * * Source: piApproximation Video, randomnumberstream section by Tim Dywer
    */
-  const alienShootStream = (seed: number) => interval(1000).pipe(
+  const alienShootStream = (seed: number) => interval(3000).pipe(
     scan((r, _) => r.next(), new RNG(seed)),
     map(r => r.float())
   )
@@ -334,7 +334,7 @@ function spaceinvaders() {
               })
             ) : []
           } :
-            tick(s)
+            tick(s, e)
 
   /**
    * * collisionCheck function (Pure Function)
@@ -424,10 +424,10 @@ function spaceinvaders() {
    * @returns A different state based off on different conditions of the input state, explained below
    * * Source: inspired by FRP Asteroids, tick function section, https://tgdwyer.github.io/asteroids/ 
    */
-  const tick = (s: State) => {
+  const tick = (s: State, e: Tick) => {
     const
-      expired = (g: gameObjects) => (s.time - g.createTime) > constants.BulletExpirationTime, //A small function that checks if a bullet has expired 
-      notExpired = (g: gameObjects) => (s.time - g.createTime) <= constants.BulletExpirationTime, //A small function that does the opposite of expired. 
+      expired = (g: gameObjects) => (e.elapsed - g.createTime) > constants.BulletExpirationTime, //A small function that checks if a bullet has expired 
+      notExpired = (g: gameObjects) => (e.elapsed - g.createTime) <= constants.BulletExpirationTime, //A small function that does the opposite of expired. 
       passedLeftBorder = (g: gameObjects) => (g.pos.x < constants.HardLeftBorder ? true : false), //Determines if a gameObject has passed through a hard left border that determines the movement of the alien.   
       passedRightBorder = (g: gameObjects) => (g.pos.x > constants.HardRightBorder ? true : false), //Does the same as passedLeftBorder
 
@@ -459,7 +459,7 @@ function spaceinvaders() {
           exit: s.aliens.concat(s.alienBullets, s.shields, s.shipBullets)
         }
           : s.aliens.length === 0 ? <State>{
-            time: 0,
+            time: e.elapsed,
             ship: {
               id: "playerShip",
               pos: new LinearMotion(constants.ShipStartPos.x, constants.ShipStartPos.y),
@@ -481,7 +481,7 @@ function spaceinvaders() {
           } :
             handleCollisions(<State>{
               ...s,
-              time: s.time + 1,
+              time: e.elapsed,
               ship: { ...s.ship, pos: wrapAround(s.ship.pos.add(new LinearMotion(s.ship.velocity, 0))) },
               shipBullets: activeShipBullets,
               alienBullets: activeAlienBullets,
@@ -522,6 +522,7 @@ function spaceinvaders() {
    * * Source: FRP Asteroids final view section by Tim Dwyer, https://tgdwyer.github.io/asteroids/ 
    */
   function updateView(s: State) {
+    console.log(s.shipBullets)
     const ship = document.getElementById("ship")!;
     const svg = document.getElementById("canvas")!;
     const scores = document.getElementById("Scores")!;
