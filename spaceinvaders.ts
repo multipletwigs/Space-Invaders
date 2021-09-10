@@ -119,7 +119,7 @@ function spaceinvaders() {
     dir: number,
     objHeight: number,
     objWidth: number
-  }
+  } 
   //A wrapper for the gameObjectsI interface, so gameObjects is a legitimate type and can be used for type annotations
   type gameObjects = Readonly<gameObjectsI>
 
@@ -166,7 +166,7 @@ function spaceinvaders() {
   * @param level:number A value that determines the rows and columns of the game, the larger this value the more aliens there are 
   * @returns An array of gameObjects with the initialized properties. 
   */
-  const createStatic = (sP: staticGroup, level: number) =>
+  const createStatic = (sP: staticGroup) =>  (level: number) =>
     [...Array((sP.rows + level) * (sP.columns + level)).keys()].map(
       (val, index) =>
       ({
@@ -179,7 +179,7 @@ function spaceinvaders() {
         objWidth: sP.staticWidth
       }))
 
-  //Static Shield initializations
+  //Static Shield initial state
   const staticShield: staticGroup = {
     vT: "shields",
     rows: constants.ShieldRow,
@@ -193,7 +193,7 @@ function spaceinvaders() {
     staticHeight: constants.ShieldHeight,
     staticWidth: constants.ShieldWidth
   }
-  //Static Alien initializations
+  //Static Alien initial state
   const staticAlien: staticGroup = {
     vT: "alien",
     rows: constants.AlienRows,
@@ -207,6 +207,10 @@ function spaceinvaders() {
     staticHeight: constants.AlienHeight,
     staticWidth: constants.AlienWidth
   }
+
+  const lazyStaticShield = createStatic(staticShield)
+  const lazyStaticAlien = createStatic(staticAlien)
+
   //Initial States of the model
   const initialState: State = {
     time: 0,
@@ -219,11 +223,11 @@ function spaceinvaders() {
       objHeight: constants.ShipHeight,
       objWidth: constants.ShipWidth
     },
-    shields: createStatic(staticShield, 0),
+    shields: lazyStaticShield(0),
     shipBullets: [],
     alienBullets: [],
     exit: [],
-    aliens: createStatic(staticAlien, 0),
+    aliens: lazyStaticAlien(0),
     objCount: 0,
     gameOver: false,
     level: 0,
@@ -273,7 +277,7 @@ function spaceinvaders() {
    * * wrapAround function (Pure Function) 
    * * It is used to "teleport" the ship to the left/right side of the canvas if the ship ever reaches the other side. 
    * * The ship is smoothly wrapped from one side to another eventhough it keeps "flashing". This is due to how the function checks a position has
-   * * reached one of the canvas edges. However, I have decided to kept it because the wrapping feels smoother compared to instantly teleporting around. 
+   * * reached one of the canvas edges. However, I have decided to keep it because the wrapping feels smoother compared to instantly teleporting around. To "fix" the flash, remove + constants.ShipWidth on line 282.
    * @param param0 A parameter which is the destructuring of Linear Motion readonly class variables, consisting of x, y positions of an object.
    * @returns a new LinearMotion object that specifies the position of the ship.
    */
@@ -424,7 +428,7 @@ function spaceinvaders() {
    * @returns A different state based off on different conditions of the input state, explained below
    * * Source: inspired by FRP Asteroids, tick function section, https://tgdwyer.github.io/asteroids/ 
    */
-  const tick = (s: State, e: Tick) => {
+  const tick = (s: State, e: Tick): State => {
     const
       expired = (g: gameObjects) => (e.elapsed - g.createTime) > constants.BulletExpirationTime, //A small function that checks if a bullet has expired 
       notExpired = (g: gameObjects) => (e.elapsed - g.createTime) <= constants.BulletExpirationTime, //A small function that does the opposite of expired. 
@@ -436,7 +440,7 @@ function spaceinvaders() {
       //Alien Speed calculation, as more alien dies, the speed of aliens increase. 
       alienSpeedIncrease = (((constants.AlienRows + s.level) * (constants.AlienColumns + s.level)) - s.aliens.length)/20,
 
-      animateAliens = (gArr: Readonly<gameObjects[]>) =>
+      animateAliens = (gArr: Readonly<gameObjects[]>): Readonly<gameObjects[]> =>
         gArr.filter(passedLeftBorder).length > 0 ?
           gArr.map((g) => ({ ...g, dir: 1, pos: new LinearMotion(g.pos.x + 1, g.pos.y + constants.AlienShiftDown) })) :
           gArr.filter(passedRightBorder).length > 0 ?
@@ -469,11 +473,11 @@ function spaceinvaders() {
               objHeight: constants.ShipHeight,
               objWidth: constants.ShipWidth
             },
-            shields: createStatic(staticShield, 0),
+            shields: lazyStaticShield(0),
             shipBullets: [],
             alienBullets: [],
             exit: s.alienBullets.concat(s.shipBullets),
-            aliens: createStatic(staticAlien, s.level + 1),
+            aliens: lazyStaticAlien(s.level + 1),
             objCount: 0,
             gameOver: false,
             level: s.level + 1,
@@ -522,7 +526,6 @@ function spaceinvaders() {
    * * Source: FRP Asteroids final view section by Tim Dwyer, https://tgdwyer.github.io/asteroids/ 
    */
   function updateView(s: State) {
-    console.log(s.shipBullets)
     const ship = document.getElementById("ship")!;
     const svg = document.getElementById("canvas")!;
     const scores = document.getElementById("Scores")!;
