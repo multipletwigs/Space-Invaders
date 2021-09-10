@@ -70,7 +70,7 @@ function spaceinvaders() {
 
   /**
   * @LinearMotion Class similar to the Vec Class in FRP Asteroids Course Notes that models linear motion. 
-  * Source: Taken from FRP Asteroids, Vector Maths section. 
+  * * Source: Taken from FRP Asteroids, Vector Maths section. 
   */
   class LinearMotion {
     constructor(public readonly x: number = 0, public readonly y: number = 0) { }
@@ -83,7 +83,7 @@ function spaceinvaders() {
 
   /**
   * @RNG A simple, seedable Random Number Generator. 
-  * Source: Taken from PiApproximation Video on YouTube by Tim Dwyer. 
+  * * Source: Taken from PiApproximation Video on YouTube by Tim Dwyer. 
   */
   class RNG {
     // LCG using GCC's constants
@@ -196,18 +196,19 @@ function spaceinvaders() {
   //Static Alien initial state
   const staticAlien: staticGroup = {
     vT: "alien",
-    rows: constants.AlienRows,
-    columns: constants.AlienColumns,
+    rows: constants.AlienRows,          //Total rows of aliens
+    columns: constants.AlienColumns,    //Total columns of aliens
     velocity: constants.AlienVelocity,
     dir: 1,
-    x_start: constants.AlienStartXPos,
-    y_start: constants.AlienStartYPos,
-    x_offset: constants.AlienXOffset,
-    y_offset: constants.AlienYOffset,
-    staticHeight: constants.AlienHeight,
+    x_start: constants.AlienStartXPos,  //The x position of the first alien
+    y_start: constants.AlienStartYPos,  //The y position of the first alien
+    x_offset: constants.AlienXOffset,   //How far apart should each alien be horizontally?
+    y_offset: constants.AlienYOffset,   //How far apart should each alien be vertically? 
+    staticHeight: constants.AlienHeight, 
     staticWidth: constants.AlienWidth
   }
 
+  //Partial evaluation of different static types. Static types are explained in the report. 
   const lazyStaticShield = createStatic(staticShield)
   const lazyStaticAlien = createStatic(staticAlien)
 
@@ -320,7 +321,7 @@ function spaceinvaders() {
         objCount: s.objCount + 1
       } :
         e instanceof Restart ? {
-          ...initialState,
+          ...initialState, //Grabbing properties from initialState which is what restart needs, no states are mutated
           time: 0,
           exit: s.shipBullets.concat(s.shields, s.alienBullets, s.aliens)
         } :
@@ -330,13 +331,17 @@ function spaceinvaders() {
               (_, i) => ({
                 id: i + "alienBullets",
                 createTime: s.time,
+                //Position of each bullet is based off on the position of each Alien. The aliens are randomly chosen through the array of random number observables
+                //The number selected is based off on the length of the s.alien array, and a position is selected. 
+                //Due to how the LinearMotion class is implemented, .add returns a completely new LinearMotion object. Hence, s.aliens is not affected. 
+                //It merely grabs information about position from s.aliens 
                 pos: s.aliens[e.shooters.map(x => Math.floor(x * s.aliens.length))[i]].pos.add(new LinearMotion(constants.AlienWidth / 2, constants.AlienHeight)),
                 dir: 1,
-                velocity: constants.AlienBulletVelocity * (s.level + 1),
+                velocity: constants.AlienBulletVelocity * (s.level + 1), //Speed of the bullet is scaled off level. 
                 objHeight: constants.BulletLength,
                 objWidth: constants.BulletWidth
               })
-            ) : []
+            ) : [] //No bullets will be shot if there's no alien left for shooting. Prevents operation of .add onto empty pos. 
           } :
             tick(s, e)
 
@@ -405,7 +410,7 @@ function spaceinvaders() {
       //Has alien touched edge? 
       touchedEdge = activeAliens.filter((g) => g.pos.y > 600).length > 0 ? true: false,
 
-      //Is the game over? 
+      //Is the game over? The game is over if the alien has touched the edge, or if the ship has collided once with the bullet 
       gameIsOver = touchedEdge || collidedBulletsAndShip.length > 0
 
 
@@ -440,6 +445,8 @@ function spaceinvaders() {
       //Alien Speed calculation, as more alien dies, the speed of aliens increase. 
       alienSpeedIncrease = (((constants.AlienRows + s.level) * (constants.AlienColumns + s.level)) - s.aliens.length)/20,
 
+      //A different way of moving the aliens is done based off what has happened. If passedLeftBorder, then aliens will have to move right instead of left
+      //until it moves to the HardRightBorder
       animateAliens = (gArr: Readonly<gameObjects[]>): Readonly<gameObjects[]> =>
         gArr.filter(passedLeftBorder).length > 0 ?
           gArr.map((g) => ({ ...g, dir: 1, pos: new LinearMotion(g.pos.x + 1, g.pos.y + constants.AlienShiftDown) })) :
@@ -505,7 +512,7 @@ function spaceinvaders() {
     return stateToReturn
   }
 
-  //A very simple generalized object movement function that changes direction depending on how much you increase by it
+  //A very simple bullet movement function that changes direction depending on how much you increase by it
   const bulletMove = (go: gameObjects) => (direction: number) => {
     return {
       ...go,
@@ -595,6 +602,10 @@ function spaceinvaders() {
 
 
   //Helper Functions
+  /**
+   * * Flatmap Function (Pure Function)
+   * * Source: Asteroids05 Helper Code Section, stackblitz.com/edit/asteroids05?file=index.ts
+   */
   function flatMap<T, U>(
     a: ReadonlyArray<T>,
     f: (a: T) => ReadonlyArray<U>
